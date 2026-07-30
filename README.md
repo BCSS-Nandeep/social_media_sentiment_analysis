@@ -66,8 +66,8 @@ All four ship with real trained heads — **no fine-tuning is needed**.
 
 ## Setup
 
-Python **3.11+**, ~5 GB free disk for model downloads. GPU optional (CUDA used
-automatically, CPU fallback).
+Python **3.11 – 3.12** recommended, ~5 GB free disk for model downloads. GPU
+optional (CUDA used automatically, CPU fallback).
 
 ```bash
 cd social_sentiment_benchmark
@@ -75,6 +75,34 @@ python -m venv .venv
 .venv\Scripts\activate            # Windows  (Linux/macOS: source .venv/bin/activate)
 pip install -r requirements.txt
 ```
+
+> **Pinned transformers version.** `requirements.txt` pins
+> `transformers==4.40.2` deliberately — IndicTrans2's custom remote code
+> imports `transformers.onnx` (removed in v5) and expects the legacy
+> tuple-based `past_key_values` cache (replaced by the new Cache API in later
+> 4.5x releases, causing a `past_key_values` shape error). Do not upgrade
+> transformers unless AI4Bharat updates the model's remote code.
+
+### HuggingFace authentication (required)
+
+**IndicTrans2 is a gated model** — downloads fail without both of these steps:
+
+1. **Request access** (once): open
+   <https://huggingface.co/ai4bharat/indictrans2-indic-en-dist-200M> while
+   logged in and click **"Agree and access repository"**. A **403 Forbidden**
+   means your token is valid but this approval hasn't been granted yet.
+2. **Authenticate the machine**: create a read token at
+   <https://huggingface.co/settings/tokens> and run
+
+   ```bash
+   huggingface-cli login
+   ```
+
+   A **401 Unauthorized** means this step is missing.
+
+The other three models (NLLB, Cardiff, SieBERT) are public. If a translation
+pipeline still can't load, the run logs an actionable error, excludes that
+pipeline, and continues with the remaining one (marked in the decision trail).
 
 Optional extras:
 

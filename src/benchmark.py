@@ -26,7 +26,7 @@ from src import visualize as viz
 from src.inference import InferenceResult, SentimentClassifier
 from src.language_detector import LanguageDetector
 from src.preprocessing import preprocess_dataframe
-from src.translation import TranslationResult, Translator
+from src.translation import TranslationResult, Translator, TranslatorLoadError
 from src.utils import (
     format_seconds,
     get_peak_ram_mb,
@@ -123,7 +123,13 @@ def run_benchmark(args: Namespace) -> None:
     trans_results: dict[str, TranslationResult] = {}
     trans_metrics: dict[str, dict[str, Any]] = {}
     for key, cfg in config.TRANSLATION_MODELS.items():
-        translator = Translator(cfg, device)
+        try:
+            translator = Translator(cfg, device)
+        except TranslatorLoadError as exc:
+            logger_.error(
+                "%s excluded from the benchmark:\n%s", cfg.display_name, exc
+            )
+            continue
         result = translator.translate(
             texts, languages, batch_size=args.translation_batch_size
         )
@@ -145,24 +151,37 @@ def run_benchmark(args: Namespace) -> None:
         del translator
         gc.collect()
 
-    trans_keys = list(config.TRANSLATION_MODELS)
-    agreement = tm.agreement_scores(
-        trans_results[trans_keys[0]].texts,
-        trans_results[trans_keys[1]].texts,
-        trans_results[trans_keys[0]].translated_mask
-        | trans_results[trans_keys[1]].translated_mask,
-    )
-    logger_.info(
-        "Cross-pipeline agreement — BLEU %s, chrF %s",
-        _fmt(agreement["agreement_bleu"], ".2f"), _fmt(agreement["agreement_chrf"], ".2f"),
-    )
+    trans_keys = list(trans_results)
+    if not trans_keys:
+        raise ValueError(
+            "No translation pipeline could be loaded — fix the errors above "
+            "(HuggingFace authentication / access / transformers version) and re-run."
+        )
 
-    trans_winner, trans_trail = tm.pick_translation_winner(
-        *[trans_metrics[k] for k in trans_keys]
-    )
+    if len(trans_keys) == 2:
+        agreement = tm.agreement_scores(
+            trans_results[trans_keys[0]].texts,
+            trans_results[trans_keys[1]].texts,
+            trans_results[trans_keys[0]].translated_mask
+            | trans_results[trans_keys[1]].translated_mask,
+        )
+        logger_.info(
+            "Cross-pipeline agreement — BLEU %s, chrF %s",
+            _fmt(agreement["agreement_bleu"], ".2f"), _fmt(agreement["agreement_chrf"], ".2f"),
+        )
+        trans_winner, trans_trail = tm.pick_translation_winner(
+            *[trans_metrics[k] for k in trans_keys]
+        )
+    else:
+        agreement = {"agreement_bleu": float("nan"), "agreement_chrf": float("nan")}
+        trans_winner = trans_metrics[trans_keys[0]]
+        trans_trail = [
+            f"{trans_winner['model']} was the only pipeline that loaded — "
+            "selected by default (no comparison possible)."
+        ]
     trans_winner_key = next(
-        k for k, cfg in config.TRANSLATION_MODELS.items()
-        if cfg.display_name == trans_winner["model"]
+        k for k in trans_keys
+        if config.TRANSLATION_MODELS[k].display_name == trans_winner["model"]
     )
     logger_.info("Best translation pipeline: %s", trans_winner["model"])
     english_texts = trans_results[trans_winner_key].texts
@@ -175,7 +194,7 @@ def run_benchmark(args: Namespace) -> None:
             "post_text": df["post_text"],
         }
     )
-    for key, cfg in config.TRANSLATION_MODELS.items():
+    for key in trans_keys:
         translations_df[f"{key}_translation"] = trans_results[key].texts
         translations_df[f"{key}_time_ms"] = np.round(trans_results[key].times_ms, 3)
     if references:

@@ -36,6 +36,39 @@ from src.utils import chunked, get_gpu_peak_mb, get_model_size_mb, reset_gpu_pea
 logger = logging.getLogger("benchmark.translation")
 
 
+class TranslatorLoadError(RuntimeError):
+    """A translation model could not be loaded; the message says how to fix it."""
+
+
+def _load_error_hint(cfg: TranslationConfig, exc: Exception) -> str:
+    """Turn a raw HF/transformers load failure into an actionable message."""
+    text = f"{type(exc).__name__}: {exc}"
+    url = f"https://huggingface.co/{cfg.hf_id}"
+    if "401" in text or "Unauthorized" in text or "gated" in text.lower():
+        return (
+            f"{cfg.display_name} ({cfg.hf_id}) is a GATED model and you are not "
+            f"authenticated (401).\nFix: run `huggingface-cli login` with a token "
+            f"from https://huggingface.co/settings/tokens, and make sure you have "
+            f"requested access at {url}\nOriginal error: {text}"
+        )
+    if "403" in text or "Forbidden" in text:
+        return (
+            f"Your HuggingFace token is valid but access to {cfg.hf_id} has not "
+            f"been granted yet (403).\nFix: open {url}, click 'Agree and access "
+            f"repository' (approval can take a moment), then re-run.\n"
+            f"Original error: {text}"
+        )
+    if "transformers.onnx" in text or "past_key_values" in text or "Cache" in text:
+        return (
+            f"{cfg.display_name} failed to load due to a transformers version "
+            f"incompatibility — its custom code needs the legacy API.\n"
+            f"Fix: pip install 'transformers==4.40.2' (v5 removed "
+            f"transformers.onnx; >=4.5x changed the KV-cache API).\n"
+            f"Original error: {text}"
+        )
+    return f"Failed to load {cfg.display_name} ({cfg.hf_id}).\nOriginal error: {text}"
+
+
 @dataclass
 class TranslationResult:
     """Per-post translations plus aggregate runtime statistics."""
@@ -55,8 +88,11 @@ class Translator:
         self.device = device
         trust = cfg.family == "indictrans2"
         logger.info("Loading translator %s (%s)", cfg.display_name, cfg.hf_id)
-        self.tokenizer = AutoTokenizer.from_pretrained(cfg.hf_id, trust_remote_code=trust)
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(cfg.hf_id, trust_remote_code=trust)
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(cfg.hf_id, trust_remote_code=trust)
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(cfg.hf_id, trust_remote_code=trust)
+        except Exception as exc:
+            raise TranslatorLoadError(_load_error_hint(cfg, exc)) from exc
         self.model.to(device)
         self.model.eval()
 
