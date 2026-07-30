@@ -1,0 +1,19 @@
+transformers>=4.40
+torch>=2.1
+datasets>=2.18
+evaluate>=0.4
+accelerate>=0.28
+scikit-learn>=1.4
+matplotlib>=3.8
+pandas>=2.1
+numpy>=1.26
+psutil>=5.9
+langdetect>=1.0.9
+lingua-language-detector>=2.0
+tqdm>=4.66
+sacrebleu>=2.4
+sentencepiece>=0.2
+IndicTransToolkit>=1.0 ; python_version < "3.14"
+# Optional — enables COMET / CometKiwi translation quality scores (heavy install;
+# CometKiwi is additionally a gated HuggingFace model requiring `huggingface-cli login`):
+# unbabel-comet>=2.2

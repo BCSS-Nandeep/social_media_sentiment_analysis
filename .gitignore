@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Model checkpoints and generated outputs (keep the folders, not the contents)
+models/*
+!models/.gitkeep
+outputs/*
+!outputs/.gitkeep
+
+# HuggingFace / tooling caches
+.cache/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
