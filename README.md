@@ -1,7 +1,61 @@
-# Social Sentiment Benchmark — Translate-then-Classify
+# Multilingual Social Sentiment — Production Pipeline
 
-Production-quality two-stage pipeline for Indian multilingual political
-social-media sentiment analysis:
+**Finalized architecture (selected by benchmark):**
+
+```
+   Social Media Post
+          │
+          ▼
+  Text Preprocessing + Language Detection
+          │
+   ┌──────┴───────────────┐
+   │ English?             │ Indian language?
+   ▼                      ▼
+ bypass          IndicTrans2 (AI4Bharat)
+   │              Indic → English
+   └──────┬───────────────┘
+          ▼
+  Cardiff Twitter RoBERTa
+ (cardiffnlp/twitter-roberta-base-sentiment-latest)
+          │
+          ▼
+ Positive / Neutral / Negative
+ + language, English text, confidence, inference time
+```
+
+## Production usage
+
+```bash
+# Single post — prints JSON with language, translation, sentiment, confidence, timings
+python predict.py --text "ప్రభుత్వం ప్రకటించిన కొత్త పథకం చాలా బాగుంది"
+
+# Several posts
+python predict.py --text "First post" --text "Second post"
+
+# Batch over a CSV (needs a post_text column; extra columns preserved).
+# If a ground_truth_sentiment column exists, accuracy and macro-F1 are reported.
+python predict.py --input data/dataset.csv --output outputs/pipeline_predictions.csv
+```
+
+Or from Python:
+
+```python
+from src.pipeline import SentimentPipeline
+
+pipeline = SentimentPipeline()          # loads IndicTrans2 + Cardiff once
+result = pipeline.predict_one("रैली में भीड़ थी लेकिन भाषण में कुछ नया नहीं था।")
+print(result.language, result.sentiment, result.confidence, result.english_text)
+```
+
+Only these two models are loaded in production. The benchmark harness below is
+retained for reference — it is how this architecture was selected — and can be
+re-run at any time to re-validate the choice.
+
+---
+
+# Benchmark harness (how the winner was selected)
+
+Two-stage comparison for Indian multilingual political social-media sentiment:
 
 1. **Translation stage** — two competing Indic→English translation pipelines
    are benchmarked (BLEU / chrF / COMET / latency / memory) and the better one
@@ -190,9 +244,11 @@ social_sentiment_benchmark/
 │   ├── inference.py              # sentiment models, label mapping, binary→3-class
 │   ├── metrics.py                # sentiment metrics, ROC, per-language, winner rule
 │   ├── visualize.py              # all PNG charts (validated palette)
-│   ├── benchmark.py              # two-stage orchestration + report writers
+│   ├── benchmark.py              # two-stage benchmark orchestration + reports
+│   ├── pipeline.py               # ★ finalized production pipeline (IndicTrans2 → Cardiff)
 │   └── utils.py                  # logging, seeding, device & memory helpers
 ├── config.py                     # every path, model id and hyper-parameter
 ├── requirements.txt
-└── run.py                        # CLI entry point
+├── predict.py                    # ★ production CLI (single post or CSV batch)
+└── run.py                        # benchmark CLI
 ```
