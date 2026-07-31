@@ -23,7 +23,115 @@
  + language, English text, confidence, inference time
 ```
 
-## Production usage
+## How to run — step by step
+
+### Step 0. Prerequisites
+
+- **Python 3.11 or 3.12** (`python --version` to check)
+- ~5 GB free disk for model downloads; internet access on first run
+- A free [HuggingFace account](https://huggingface.co/join)
+- Optional: NVIDIA GPU with CUDA (used automatically; CPU works too, just slower)
+
+### Step 1. Get the code
+
+```bash
+git clone https://github.com/BCSS-Nandeep/social_media_sentiment_analysis.git
+cd social_media_sentiment_analysis
+```
+
+### Step 2. Create and activate a virtual environment
+
+```bash
+python -m venv .venv
+
+# Windows (PowerShell/cmd):
+.venv\Scripts\activate
+
+# Linux / macOS:
+source .venv/bin/activate
+```
+
+### Step 3. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+Do **not** upgrade `transformers` afterwards — it is pinned to `4.40.2` on
+purpose (newer versions break IndicTrans2's custom code; see the note further
+down).
+
+### Step 4. Get access to the gated IndicTrans2 model (one-time)
+
+1. Open <https://huggingface.co/ai4bharat/indictrans2-indic-en-dist-200M>
+   while logged in to HuggingFace and click **"Agree and access repository"**.
+2. Create a **read** token at <https://huggingface.co/settings/tokens>, then
+   authenticate this machine:
+
+   ```bash
+   huggingface-cli login
+   ```
+
+   (paste the token when prompted)
+
+### Step 5. Quick test — classify one post
+
+```bash
+python predict.py --text "ప్రభుత్వం ప్రకటించిన కొత్త పథకం చాలా బాగుంది"
+```
+
+The first run downloads the two models (~1.5 GB total). You should get JSON
+like:
+
+```json
+[
+  {
+    "post_text": "ప్రభుత్వం ప్రకటించిన కొత్త పథకం చాలా బాగుంది",
+    "language": "te",
+    "english_text": "The new scheme announced by the government is very good",
+    "was_translated": true,
+    "sentiment": "Positive",
+    "confidence": 0.94,
+    "translation_time_ms": 210.5,
+    "sentiment_time_ms": 18.2,
+    "total_time_ms": 228.7
+  }
+]
+```
+
+### Step 6. Batch run over a CSV
+
+```bash
+python predict.py --input data/dataset.csv --output outputs/pipeline_predictions.csv
+```
+
+- The CSV must have a `post_text` column; every other column is preserved.
+- Results land in `outputs/pipeline_predictions.csv` with the detected
+  language, English text, sentiment, confidence and per-stage timings added.
+- If the CSV has a `ground_truth_sentiment` column, the last line printed is
+  the evaluation, e.g. `Evaluation vs ground truth — accuracy 0.8421,
+  macro-F1 0.8156, avg 240.3 ms/post`.
+
+### Step 7 (optional). Re-run the full model-selection benchmark
+
+```bash
+python run.py --input data/dataset.csv
+```
+
+This compares IndicTrans2 vs NLLB-200 and Cardiff vs SieBERT again, writing
+all metric tables, charts and `BEST_PIPELINE.md` to `outputs/` (details in the
+benchmark section below).
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `401 Unauthorized` | machine not logged in to HF | Step 4.2 (`huggingface-cli login`) |
+| `403 Forbidden` | model access not granted yet | Step 4.1 (click "Agree and access repository", wait a moment) |
+| `No module named 'transformers.onnx'` or `past_key_values` shape error | transformers was upgraded | `pip install transformers==4.40.2` |
+| Very slow on CPU | large batches / beams | add `--translation-batch-size 4`; keep `TRANSLATION_NUM_BEAMS = 1` in config.py |
+
+## Production usage (reference)
 
 ```bash
 # Single post — prints JSON with language, translation, sentiment, confidence, timings
@@ -35,6 +143,9 @@ python predict.py --text "First post" --text "Second post"
 # Batch over a CSV (needs a post_text column; extra columns preserved).
 # If a ground_truth_sentiment column exists, accuracy and macro-F1 are reported.
 python predict.py --input data/dataset.csv --output outputs/pipeline_predictions.csv
+
+# All options
+python predict.py --help
 ```
 
 Or from Python:
