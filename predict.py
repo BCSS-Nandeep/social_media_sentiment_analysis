@@ -49,8 +49,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--device", choices=("auto", "cuda", "cpu"), default=config.DEVICE
     )
     parser.add_argument("--seed", type=int, default=config.SEED)
+    parser.add_argument(
+        "--intelligence", action="store_true",
+        help=(
+            "Also run the stage-3 intelligence layer (intent, category, risk, "
+            "reasoning, summary, recommended action) over the pipeline output. "
+            "Requires OLLAMA_BASE_URL to be reachable."
+        ),
+    )
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging.")
     return parser.parse_args(argv)
+
+
+def _build_analyzer(enabled: bool):
+    """Construct the intelligence layer, or None. Never fatal — a missing
+    provider must not stop sentiment predictions from being written."""
+    if not enabled:
+        return None
+    from src.intelligence import IntelligenceAnalyzer
+
+    try:
+        return IntelligenceAnalyzer()
+    except Exception as exc:
+        print(f"WARNING: intelligence layer unavailable ({exc}); "
+              f"continuing with sentiment only.", file=sys.stderr)
+        return None
 
 
 def main() -> int:
@@ -69,6 +92,8 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
+    analyzer = _build_analyzer(args.intelligence)
+
     try:
         if args.text:
             results = pipeline.predict_batch(
@@ -76,10 +101,14 @@ def main() -> int:
                 batch_size=args.batch_size,
                 translation_batch_size=args.translation_batch_size,
             )
-            print(json.dumps([r.to_dict() for r in results], ensure_ascii=False, indent=2))
+            payloads = [r.to_dict() for r in results]
+            if analyzer is not None:
+                for payload, record in zip(payloads, analyzer.analyze_batch(payloads)):
+                    payload["intelligence"] = record.to_dict()
+            print(json.dumps(payloads, ensure_ascii=False, indent=2))
             return 0
 
-        return _run_csv(pipeline, args)
+        return _run_csv(pipeline, args, analyzer)
     except (FileNotFoundError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -87,10 +116,12 @@ def main() -> int:
         print("Interrupted by user.", file=sys.stderr)
         return 130
     finally:
+        if analyzer is not None:
+            analyzer.close()
         pipeline.free()
 
 
-def _run_csv(pipeline, args: argparse.Namespace) -> int:
+def _run_csv(pipeline, args: argparse.Namespace, analyzer=None) -> int:
     import pandas as pd
 
     from src.preprocessing import normalize_label
@@ -120,6 +151,20 @@ def _run_csv(pipeline, args: argparse.Namespace) -> int:
     out["translation_time_ms"] = [r.translation_time_ms for r in results]
     out["sentiment_time_ms"] = [r.sentiment_time_ms for r in results]
     out["total_time_ms"] = [r.total_time_ms for r in results]
+
+    # Both output sets live in the same record: the deterministic NLP columns
+    # above and the intelligence columns below.
+    if analyzer is not None:
+        records = analyzer.analyze_batch([r.to_dict() for r in results])
+        out["category"] = [rec.category for rec in records]
+        out["intent"] = [rec.intent for rec in records]
+        out["risk_score"] = [rec.risk_score for rec in records]
+        out["reasoning"] = [rec.reasoning for rec in records]
+        out["summary"] = [rec.summary for rec in records]
+        out["recommended_action"] = [rec.recommended_action for rec in records]
+        out["evidence_confidence"] = [rec.evidence_confidence for rec in records]
+        out["intelligence_signals"] = ["|".join(rec.signals) for rec in records]
+        out["intelligence_source"] = [rec.source for rec in records]
 
     output_path = resolve_path(args.output, config.BASE_DIR)
     output_path.parent.mkdir(parents=True, exist_ok=True)

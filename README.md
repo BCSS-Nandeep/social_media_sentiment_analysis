@@ -251,6 +251,112 @@ re-run at any time to re-validate the choice.
 
 ---
 
+# Intelligence layer (stage 3)
+
+An **additive** second stage that reasons over the pipeline's structured output.
+It does not replace, bypass or duplicate any pipeline stage.
+
+```
+ [ language detection -> romanized-Indic LID -> IndicXlit -> IndicTrans2
+   -> Cardiff RoBERTa ]                                    <- unchanged
+                    │
+                    ▼   language, english_text, sentiment, confidence,
+                        was_translated, was_transliterated  (trusted facts)
+                    │
+                    ▼
+              Ollama (guard-railed)
+                    │
+                    ▼
+   intent | category | risk_score | reasoning | summary | recommended_action
+```
+
+**The deterministic pipeline owns** language detection, transliteration,
+translation, sentiment and confidence. **Ollama never recomputes any of them** —
+the system prompt in [src/intelligence.py](src/intelligence.py) forbids it
+explicitly, and those values are passed in as established facts.
+
+## Endpoint
+
+`/analyze` is untouched — same request schema, same response keys, same latency.
+Intelligence is a separate endpoint:
+
+```bash
+curl -X POST http://localhost:8003/analyze/intelligence \
+  -H "Content-Type: application/json" \
+  -d '{"texts": ["ప్రభుత్వం ప్రకటించిన కొత్త పథకం చాలా బాగుంది"]}'
+```
+
+Each result carries every `/analyze` key plus an `intelligence` object:
+
+```json
+{
+  "post_text": "...", "language": "te", "english_text": "...",
+  "sentiment": "Negative", "confidence": 0.97,
+  "was_translated": true, "was_transliterated": false,
+  "intelligence": {
+    "category": "Protest", "intent": "Protest Mobilization", "risk_score": 72,
+    "reasoning": "...", "summary": "...", "recommended_action": "Monitor",
+    "evidence_confidence": "high",
+    "signals": ["code_mixed"], "source": "provider",
+    "model": "llama3.1:8b", "latency_ms": 1840.2
+  }
+}
+```
+
+Both output sets belong in the stored analysis record. `predict.py --intelligence`
+writes them as columns alongside the sentiment columns.
+
+## Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama host — point at your other server |
+| `OLLAMA_MODEL` | `llama3.1:8b` | Model tag |
+| `OLLAMA_TIMEOUT_S` | 120 | Per-request timeout |
+| `OLLAMA_RETRIES` | 2 | Retries on transport failure or unparseable output |
+| `OLLAMA_CONCURRENCY` | 4 | Parallel calls per batch |
+| `OLLAMA_TEMPERATURE` | 0 | 0 for reproducible assessments |
+| `OLLAMA_JSON_SCHEMA` | 1 | Constrain decoding to the schema (Ollama ≥ 0.5); auto-downgrades if the server rejects it |
+| `SENTIMENT_INTELLIGENCE_PROVIDER` | `ollama` | Selects the provider from the registry |
+
+## Guarantees
+
+- **Never fatal.** Provider unreachable, timeout, malformed JSON, or a label
+  outside the taxonomy all degrade to a well-formed record with `risk_score` 0,
+  `recommended_action` "Human Review" and `source: "error"`. The sentiment
+  result is always returned intact. `/analyze` cannot be affected at all — the
+  layer is imported defensively at startup and its absence only makes
+  `/analyze/intelligence` return 503.
+- **Taxonomy is enforced in code, not just in the prompt.** Out-of-vocabulary
+  labels are clamped to `Unknown` / `Human Review`, and `risk_score` is clamped
+  to 0–100, so consumers can rely on the enums.
+- **Runs outside the inference lock.** Intelligence is network-bound work
+  against another host; it never blocks sentiment inference.
+
+## Edge cases
+
+Posts with no analyzable content — empty, emoji-only, URL-only, media
+placeholders — are resolved deterministically without a model call. Everything
+else goes to the model with precomputed **signals** attached, so handling is
+consistent and auditable rather than left for the model to rediscover:
+
+`very_short` · `truncated` · `low_sentiment_confidence` · `code_mixed` ·
+`romanized_indic_transliterated` · `translation_unavailable` ·
+`language_undetermined` · `quoted_or_forwarded` · `possible_spam` ·
+`link_heavy` · `possible_ocr_noise` · `duplicate_post`
+
+Duplicate posts within a batch are analyzed once and the record reused. Very
+long posts are truncated head-and-tail so both the opening framing and any
+closing call to action survive.
+
+## Adding another intelligence backend
+
+Subclass `IntelligenceProvider` (implement `generate` and `describe`) and
+register it in `PROVIDERS`. Validation, taxonomy clamping, triage, batching and
+fallbacks are handled centrally, and nothing in the sentiment pipeline changes.
+
+---
+
 # Benchmark harness (how the winner was selected)
 
 Two-stage comparison for Indian multilingual political social-media sentiment:

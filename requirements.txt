@@ -32,6 +32,11 @@ fastapi>=0.110.0
 uvicorn>=0.27.0
 python-dotenv>=1.0.0
 
+# Intelligence layer (src/intelligence.py) — HTTP client for the Ollama host
+# named by OLLAMA_BASE_URL. Already present transitively via huggingface_hub;
+# pinned explicitly because this module imports it directly.
+requests>=2.31.0
+
 # Romanized-Indic transliteration (src/transliteration.py) — IndicXlit, loaded
 # directly via fairseq (NOT the `ai4bharat-transliteration` PyPI wrapper: it
 # unconditionally imports urduhack -> tensorflow, which segfaults in this

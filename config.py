@@ -187,6 +187,60 @@ API_MAX_TEXTS: int = int(os.getenv("SENTIMENT_API_MAX_TEXTS", "256"))
 API_MAX_TEXT_CHARS: int = int(os.getenv("SENTIMENT_API_MAX_TEXT_CHARS", "5000"))
 API_MAX_TOTAL_CHARS: int = int(os.getenv("SENTIMENT_API_MAX_TOTAL_CHARS", "200000"))
 
+
+# --------------------------------------------------------------------------- #
+# Stage 3 — intelligence layer (Ollama)
+# --------------------------------------------------------------------------- #
+# A SECOND stage that consumes the deterministic pipeline's structured output.
+# It never re-does language detection, transliteration, translation or sentiment
+# — those are trusted inputs. It adds intent, category, contextual risk,
+# reasoning, an executive summary and a recommended action.
+#
+# The provider is selected by name so further intelligence backends can be
+# registered in src/intelligence.py without touching the sentiment pipeline.
+INTELLIGENCE_PROVIDER: str = os.getenv("SENTIMENT_INTELLIGENCE_PROVIDER", "ollama")
+
+# Ollama runs on a separate host — set OLLAMA_BASE_URL in .env to point at it.
+OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+OLLAMA_TIMEOUT_S: float = float(os.getenv("OLLAMA_TIMEOUT_S", "120"))
+OLLAMA_RETRIES: int = int(os.getenv("OLLAMA_RETRIES", "2"))
+# Intelligence calls are network-bound and run outside the model-inference lock,
+# so a batch fans out across this many concurrent requests to the Ollama host.
+OLLAMA_CONCURRENCY: int = int(os.getenv("OLLAMA_CONCURRENCY", "4"))
+OLLAMA_TEMPERATURE: float = float(os.getenv("OLLAMA_TEMPERATURE", "0"))
+OLLAMA_NUM_CTX: int = int(os.getenv("OLLAMA_NUM_CTX", "4096"))
+# Ollama >= 0.5 constrains generation to a JSON schema, which is far more
+# reliable than format="json" alone. Set to 0 for older servers; the provider
+# also falls back automatically if the server rejects a schema.
+OLLAMA_JSON_SCHEMA: bool = os.getenv("OLLAMA_JSON_SCHEMA", "1") not in ("0", "false", "False")
+
+# Taxonomies. "Unknown" is always additionally permitted for category/intent —
+# the guard rails require it rather than a guess when evidence is insufficient.
+INTENT_LABELS: tuple[str, ...] = (
+    "Information", "Opinion", "Protest Mobilization", "Call to Action", "Threat",
+    "Recruitment", "Rumor", "Propaganda", "Satire", "Misinformation",
+)
+CATEGORY_LABELS: tuple[str, ...] = (
+    "Political", "Religious", "Communal", "Criminal", "Cyber Crime",
+    "Hate Speech", "Public Safety", "Protest", "Terrorism", "Fake News",
+    "Financial Fraud", "Other",
+)
+ACTION_LABELS: tuple[str, ...] = (
+    "Ignore", "Monitor", "Human Review", "Escalate", "Immediate Attention",
+)
+UNKNOWN_LABEL: str = "Unknown"
+
+# Edge-case thresholds. These produce deterministic *signals* attached to the
+# prompt; the model is told to weigh them. They never decide the verdict, except
+# where there is literally no analyzable content (see triage() in intelligence.py).
+INTELLIGENCE_MAX_TEXT_CHARS: int = int(os.getenv("SENTIMENT_INTELLIGENCE_MAX_TEXT_CHARS", "4000"))
+INTELLIGENCE_LOW_CONFIDENCE: float = float(os.getenv("SENTIMENT_INTELLIGENCE_LOW_CONFIDENCE", "0.60"))
+INTELLIGENCE_SHORT_WORDS: int = int(os.getenv("SENTIMENT_INTELLIGENCE_SHORT_WORDS", "3"))
+# Fraction of alphabetic characters in the minority script above which a post
+# counts as genuinely code-mixed rather than incidental.
+INTELLIGENCE_CODEMIX_RATIO: float = float(os.getenv("SENTIMENT_INTELLIGENCE_CODEMIX_RATIO", "0.15"))
+
 # --------------------------------------------------------------------------- #
 # Language detection
 # --------------------------------------------------------------------------- #

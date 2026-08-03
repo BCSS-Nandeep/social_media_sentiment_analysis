@@ -15,8 +15,18 @@ WIRE CONTRACT — deliberately unchanged, this service is consumed in production
         sentiment_time_ms, total_time_ms
     GET  /health                          -> {"healthy": bool, "device": str|null, ...}
 
-`/health` gained additive keys only (`stages`, `limits`); existing consumers
-that read `healthy` / `device` are unaffected.
+`/health` gained additive keys only (`stages`, `limits`, `intelligence`);
+existing consumers that read `healthy` / `device` are unaffected.
+
+The intelligence layer is a SEPARATE endpoint, so /analyze keeps its exact
+request schema, response keys and latency:
+    POST /analyze/intelligence  {"texts": [str, ...]}
+        -> {"results": [ {<every /analyze key>, "intelligence": {...}} ]}
+
+That endpoint runs the identical deterministic pipeline and then adds the
+second-stage assessment. Sentiment is never recomputed or overridden by it, and
+if the intelligence provider is unreachable each record still carries a
+well-formed "insufficient evidence" assessment alongside intact sentiment.
 
 Concurrency: /analyze is a sync endpoint, so FastAPI dispatches it on the
 threadpool and several requests can be in it at once. The pipeline is a single
@@ -53,6 +63,7 @@ for noisy in ("transformers", "urllib3", "filelock", "huggingface_hub"):
 logger = logging.getLogger("sentiment_api")
 
 _pipeline = None  # loaded once at startup, reused across requests
+_analyzer = None  # stage-3 intelligence layer; None when it failed to construct
 
 # Serializes model inference across the threadpool. Requests queue here; the
 # wait is logged separately from the compute so a slow response can be
@@ -84,9 +95,34 @@ async def lifespan(_app: FastAPI):
         "  request limits             : %d texts, %d chars/text, %d chars total",
         config.API_MAX_TEXTS, config.API_MAX_TEXT_CHARS, config.API_MAX_TOTAL_CHARS,
     )
+
+    # Stage 3 is optional and must never be able to take down /analyze, so it is
+    # imported and constructed defensively — a missing dependency or a bad
+    # OLLAMA_BASE_URL degrades to "intelligence unavailable", not a failed boot.
+    global _analyzer
+    try:
+        from src.intelligence import IntelligenceAnalyzer
+
+        _analyzer = IntelligenceAnalyzer()
+        reachable = _analyzer.health()
+        logger.info(
+            "  intelligence               : %s (%s at startup)",
+            _analyzer.describe(),
+            "reachable" if reachable else "NOT reachable — will retry per request",
+        )
+    except Exception as exc:
+        _analyzer = None
+        logger.error(
+            "Intelligence layer unavailable (%s) — /analyze is unaffected; "
+            "/analyze/intelligence will return 503.", exc,
+        )
+
     try:
         yield
     finally:
+        if _analyzer is not None:
+            _analyzer.close()
+            _analyzer = None
         if _pipeline is not None:
             _pipeline.free()
             _pipeline = None
@@ -154,7 +190,45 @@ def health():
             "max_text_chars": config.API_MAX_TEXT_CHARS,
             "max_total_chars": config.API_MAX_TOTAL_CHARS,
         },
+        "intelligence": (
+            {"available": True, **_analyzer.describe(), "reachable": _analyzer.health()}
+            if _analyzer is not None
+            else {"available": False}
+        ),
     }
+
+
+def _run_pipeline(texts: list[str], request_id: int) -> list:
+    """Deterministic stage under the inference lock. Shared by both endpoints so
+    they cannot drift apart — /analyze/intelligence runs the identical pipeline."""
+    queued_at = time.perf_counter()
+    with _inference_lock:
+        waited_ms = (time.perf_counter() - queued_at) * 1000.0
+        if waited_ms > 1000.0:
+            logger.info(
+                "req %d: waited %.1fs for the inference lock (service is saturated; "
+                "run more replicas or batch more posts per request)",
+                request_id, waited_ms / 1000.0,
+            )
+        started = time.perf_counter()
+        try:
+            results = _pipeline.predict_batch(
+                texts,
+                batch_size=config.BATCH_SIZE,
+                translation_batch_size=config.TRANSLATION_BATCH_SIZE,
+            )
+        except Exception:
+            logger.exception(
+                "req %d: failed after %.1fs", request_id, time.perf_counter() - started
+            )
+            raise
+        compute_ms = (time.perf_counter() - started) * 1000.0
+
+    logger.info(
+        "req %d: pipeline completed %d text(s) in %.0f ms (%.0f ms/post, %.0f ms queued)",
+        request_id, len(results), compute_ms, compute_ms / len(results), waited_ms,
+    )
+    return results
 
 
 @app.post("/analyze")
@@ -169,35 +243,55 @@ def analyze(req: AnalyzeRequest):
     logger.info(
         "req %d: received %d text(s), %d chars", request_id, len(req.texts), total_chars
     )
-
-    queued_at = time.perf_counter()
-    with _inference_lock:
-        waited_ms = (time.perf_counter() - queued_at) * 1000.0
-        if waited_ms > 1000.0:
-            logger.info(
-                "req %d: waited %.1fs for the inference lock (service is saturated; "
-                "run more replicas or batch more posts per request)",
-                request_id, waited_ms / 1000.0,
-            )
-        started = time.perf_counter()
-        try:
-            results = _pipeline.predict_batch(
-                req.texts,
-                batch_size=config.BATCH_SIZE,
-                translation_batch_size=config.TRANSLATION_BATCH_SIZE,
-            )
-        except Exception:
-            logger.exception(
-                "req %d: failed after %.1fs", request_id, time.perf_counter() - started
-            )
-            raise
-        compute_ms = (time.perf_counter() - started) * 1000.0
-
-    logger.info(
-        "req %d: completed %d text(s) in %.0f ms (%.0f ms/post, %.0f ms queued)",
-        request_id, len(results), compute_ms, compute_ms / len(results), waited_ms,
-    )
+    results = _run_pipeline(req.texts, request_id)
     return {"results": [r.to_dict() for r in results]}
+
+
+@app.post("/analyze/intelligence")
+def analyze_intelligence(req: AnalyzeRequest):
+    """Pipeline output plus the stage-3 assessment, in one record per post.
+
+    The deterministic result is identical to /analyze — same models, same code
+    path — with an added `intelligence` object. Intelligence runs *outside* the
+    inference lock: it is network-bound work against a separate host, so holding
+    the lock through it would block sentiment inference for no reason.
+    """
+    if _pipeline is None:
+        raise HTTPException(status_code=503, detail="Pipeline still loading")
+    if _analyzer is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Intelligence layer unavailable — check OLLAMA_BASE_URL and the "
+                "service logs. /analyze is unaffected."
+            ),
+        )
+    if not req.texts:
+        return {"results": []}
+
+    total_chars = _validate(req.texts)
+    request_id = next(_request_ids)
+    logger.info(
+        "req %d: received %d text(s), %d chars (with intelligence)",
+        request_id, len(req.texts), total_chars,
+    )
+
+    results = _run_pipeline(req.texts, request_id)
+    payloads = [r.to_dict() for r in results]
+
+    started = time.perf_counter()
+    records = _analyzer.analyze_batch(payloads)
+    logger.info(
+        "req %d: intelligence completed in %.0f ms",
+        request_id, (time.perf_counter() - started) * 1000.0,
+    )
+
+    return {
+        "results": [
+            {**payload, "intelligence": record.to_dict()}
+            for payload, record in zip(payloads, records)
+        ]
+    }
 
 
 if __name__ == "__main__":
