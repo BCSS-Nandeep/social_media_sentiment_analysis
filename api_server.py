@@ -200,9 +200,23 @@ def health():
 
 def _run_pipeline(texts: list[str], request_id: int) -> list:
     """Deterministic stage under the inference lock. Shared by both endpoints so
-    they cannot drift apart — /analyze/intelligence runs the identical pipeline."""
+    they cannot drift apart — /analyze/intelligence runs the identical pipeline.
+
+    The lock is acquired with a timeout: a request that hangs inside the model
+    (GPU-level stall, pathological input) must fail on its own instead of
+    holding the lock forever and queuing every other request — including
+    /health — behind it indefinitely."""
     queued_at = time.perf_counter()
-    with _inference_lock:
+    if not _inference_lock.acquire(timeout=config.INFERENCE_LOCK_TIMEOUT_S):
+        waited_s = time.perf_counter() - queued_at
+        logger.error(
+            "req %d: gave up after %.0fs waiting for the inference lock — a prior "
+            "request appears stuck; failing this request instead of hanging forever",
+            request_id, waited_s,
+        )
+        raise TimeoutError(f"inference lock unavailable after {waited_s:.0f}s")
+
+    try:
         waited_ms = (time.perf_counter() - queued_at) * 1000.0
         if waited_ms > 1000.0:
             logger.info(
@@ -223,6 +237,8 @@ def _run_pipeline(texts: list[str], request_id: int) -> list:
             )
             raise
         compute_ms = (time.perf_counter() - started) * 1000.0
+    finally:
+        _inference_lock.release()
 
     logger.info(
         "req %d: pipeline completed %d text(s) in %.0f ms (%.0f ms/post, %.0f ms queued)",
@@ -243,7 +259,10 @@ def analyze(req: AnalyzeRequest):
     logger.info(
         "req %d: received %d text(s), %d chars", request_id, len(req.texts), total_chars
     )
-    results = _run_pipeline(req.texts, request_id)
+    try:
+        results = _run_pipeline(req.texts, request_id)
+    except TimeoutError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     return {"results": [r.to_dict() for r in results]}
 
 
@@ -276,7 +295,10 @@ def analyze_intelligence(req: AnalyzeRequest):
         request_id, len(req.texts), total_chars,
     )
 
-    results = _run_pipeline(req.texts, request_id)
+    try:
+        results = _run_pipeline(req.texts, request_id)
+    except TimeoutError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     payloads = [r.to_dict() for r in results]
 
     started = time.perf_counter()

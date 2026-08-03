@@ -187,6 +187,12 @@ API_MAX_TEXTS: int = int(os.getenv("SENTIMENT_API_MAX_TEXTS", "256"))
 API_MAX_TEXT_CHARS: int = int(os.getenv("SENTIMENT_API_MAX_TEXT_CHARS", "5000"))
 API_MAX_TOTAL_CHARS: int = int(os.getenv("SENTIMENT_API_MAX_TOTAL_CHARS", "200000"))
 
+# A single request that hangs inside the model (GPU-level stall, pathological
+# input) must not take the whole service down with it. Requests queue for the
+# inference lock up to this long; past it they fail fast with 503 instead of
+# blocking every other request — including /health — forever. Comfortably
+# above the slowest observed legitimate single-post translation (~5 min).
+INFERENCE_LOCK_TIMEOUT_S: float = float(os.getenv("SENTIMENT_INFERENCE_LOCK_TIMEOUT_S", "600"))
 
 # --------------------------------------------------------------------------- #
 # Stage 3 — intelligence layer (Ollama)
