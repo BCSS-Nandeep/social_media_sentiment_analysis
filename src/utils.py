@@ -50,6 +50,26 @@ def resolve_device(requested: str = "auto") -> torch.device:
     return torch.device("cpu")
 
 
+def configure_torch_threads(num_threads: int = 0) -> int:
+    """Apply and report torch's CPU intra-op thread count.
+
+    Returns the effective value. ``num_threads <= 0`` leaves torch's default in
+    place and only reports it — worth checking against the container's CPU limit,
+    since torch sizes its default from the *visible* core count and will happily
+    oversubscribe a cgroup-limited container into heavy contention.
+    """
+    logger = logging.getLogger("benchmark")
+    if num_threads > 0:
+        torch.set_num_threads(num_threads)
+        logger.info("torch CPU threads set to %d (SENTIMENT_TORCH_NUM_THREADS).", num_threads)
+    effective = torch.get_num_threads()
+    logger.info(
+        "torch CPU threads: %d intra-op, %d inter-op (%d logical cores visible).",
+        effective, torch.get_num_interop_threads(), psutil.cpu_count() or -1,
+    )
+    return effective
+
+
 def get_peak_ram_mb() -> float:
     """Peak resident memory of this process in MB (cross-platform best effort)."""
     mem = psutil.Process().memory_info()

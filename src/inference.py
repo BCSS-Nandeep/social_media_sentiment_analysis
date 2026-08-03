@@ -11,6 +11,7 @@ renormalization, so near-ties between the two poles read as Neutral.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass
 
@@ -86,7 +87,12 @@ def to_canonical_probs(raw_probs: np.ndarray, mapping: dict[int, int]) -> np.nda
 
 
 class SentimentClassifier:
-    """A tokenizer + pretrained sentiment model wrapped for benchmarking."""
+    """A tokenizer + pretrained sentiment model wrapped for benchmarking.
+
+    Thread safety: :meth:`predict` holds an instance lock, so concurrent callers
+    (the HTTP service runs its endpoint in a threadpool) queue rather than
+    driving the same torch module at once.
+    """
 
     def __init__(
         self, cfg: SentimentModelConfig, device: torch.device, max_length: int = 128
@@ -94,6 +100,7 @@ class SentimentClassifier:
         self.cfg = cfg
         self.device = device
         self.max_length = max_length
+        self._lock = threading.Lock()
 
         local = cfg.checkpoint_dir
         use_local = (local / "config.json").exists()
@@ -121,7 +128,11 @@ class SentimentClassifier:
         return get_model_size_mb(self.model)
 
     def predict(self, texts: list[str], batch_size: int = 16) -> InferenceResult:
-        """Run batched inference and time every batch."""
+        """Run batched inference and time every batch (serialized on the lock)."""
+        with self._lock:
+            return self._predict_locked(texts, batch_size)
+
+    def _predict_locked(self, texts: list[str], batch_size: int) -> InferenceResult:
         all_probs: list[np.ndarray] = []
         times_ms: list[float] = []
         reset_gpu_peak(self.device)
@@ -170,8 +181,12 @@ class SentimentClassifier:
         )
 
     def free(self) -> None:
-        """Release model memory (important when benchmarking models serially)."""
-        del self.model
-        del self.tokenizer
+        """Release model memory (important when benchmarking models serially).
+
+        Idempotent — the service frees the pipeline on shutdown, and callers
+        may already have freed it themselves.
+        """
+        self.model = None
+        self.tokenizer = None
         if self.device.type == "cuda":
             torch.cuda.empty_cache()

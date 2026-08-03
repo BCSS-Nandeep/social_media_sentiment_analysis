@@ -15,6 +15,8 @@ No other translation or sentiment models are loaded here.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from dataclasses import asdict, dataclass
 
 import torch
@@ -27,7 +29,7 @@ from src.preprocessing import clean_text
 from src.script_detection import is_latin_script
 from src.transliteration import Transliterator
 from src.translation import Translator
-from src.utils import resolve_device, set_seed
+from src.utils import configure_torch_threads, resolve_device, set_seed
 
 logger = logging.getLogger("benchmark.pipeline")
 
@@ -55,7 +57,15 @@ class PipelineResult:
 
 
 class SentimentPipeline:
-    """Load once, then call :meth:`predict_one` / :meth:`predict_batch`."""
+    """Load once, then call :meth:`predict_one` / :meth:`predict_batch`.
+
+    Thread safety: :meth:`predict_batch` holds a pipeline-wide lock for its whole
+    body, so concurrent callers queue instead of interleaving. Every stage keeps
+    per-instance mutable state (fairseq generators, tokenizer source language,
+    torch modules) that is not safe to drive from two threads at once; the
+    individual stages lock too, but the outer lock is what keeps a single
+    request's stages from being interleaved with another's.
+    """
 
     def __init__(
         self,
@@ -68,6 +78,11 @@ class SentimentPipeline:
             self.device = resolve_device(device or config.DEVICE)
         else:
             self.device = device
+        if self.device.type == "cpu":
+            configure_torch_threads(config.TORCH_NUM_THREADS)
+
+        self._lock = threading.Lock()
+        self._freed = False
 
         self.detector = LanguageDetector(seed=seed)
         self.roman_detector = RomanLanguageDetector(device=self.device)
@@ -85,6 +100,26 @@ class SentimentPipeline:
             self.classifier.cfg.display_name,
             self.device.type,
         )
+
+    def stage_status(self) -> dict[str, object]:
+        """Which stages are actually live, for /health and startup logging.
+
+        Every optional stage degrades silently by design (a missing fasttext or
+        fairseq install disables roman LID / transliteration and the pipeline
+        keeps going), so a caller seeing plausible-but-wrong output has no way
+        to tell a fully-configured deployment from a half-configured one. This
+        makes that difference observable without log access.
+        """
+        return {
+            "device": self.device.type,
+            "language_detector": self.detector.backend,
+            "roman_lid_ftr": self.roman_detector.ftr is not None,
+            "roman_lid_bert": self.roman_detector.bert is not None,
+            "transliteration_languages": sorted(self.transliterator.models),
+            "translator": self.translator.cfg.display_name,
+            "translator_preprocessing": self.translator.preprocessing_mode,
+            "sentiment_model": self.classifier.cfg.display_name,
+        }
 
     def _refine_latin_languages(self, cleaned: list[str], languages: list[str]) -> list[str]:
         """The general detector (lingua) has no romanized-Indic language
@@ -128,16 +163,51 @@ class SentimentPipeline:
         batch_size: int = config.BATCH_SIZE,
         translation_batch_size: int = config.TRANSLATION_BATCH_SIZE,
     ) -> list[PipelineResult]:
-        """Run the full pipeline over a list of posts (order preserved)."""
+        """Run the full pipeline over a list of posts (order preserved).
+
+        Serialized on the pipeline lock — see the class docstring.
+        """
+        with self._lock:
+            return self._predict_batch_locked(texts, batch_size, translation_batch_size)
+
+    def _predict_batch_locked(
+        self, texts: list[str], batch_size: int, translation_batch_size: int
+    ) -> list[PipelineResult]:
+        if self._freed:
+            raise RuntimeError("SentimentPipeline.free() has been called; reload the pipeline.")
+
+        # Per-stage wall-clock, logged at the end of every batch. The result
+        # objects only carry translation and sentiment timings, so without this
+        # a slow request gives no way to tell which stage actually cost the time.
+        t_start = time.perf_counter()
         cleaned = [clean_text(text) for text in texts]
         languages = self.detector.detect_batch(cleaned)
+        t_detect = time.perf_counter()
         languages = self._refine_latin_languages(cleaned, languages)
+        t_refine = time.perf_counter()
         working_texts, was_transliterated = self._transliterate_batch(cleaned, languages)
+        t_xlit = time.perf_counter()
 
         translation = self.translator.translate(
             working_texts, languages, batch_size=translation_batch_size
         )
+        t_translate = time.perf_counter()
         sentiment = self.classifier.predict(translation.texts, batch_size=batch_size)
+        t_end = time.perf_counter()
+
+        logger.info(
+            "Batch of %d done in %.0f ms — detect %.0f | roman-lid %.0f | "
+            "translit %.0f (%d posts) | translate %.0f (%d posts, %d cached) | "
+            "sentiment %.0f | languages %s",
+            len(texts), (t_end - t_start) * 1000.0,
+            (t_detect - t_start) * 1000.0,
+            (t_refine - t_detect) * 1000.0,
+            (t_xlit - t_refine) * 1000.0, sum(was_transliterated),
+            (t_translate - t_xlit) * 1000.0,
+            int(translation.translated_mask.sum()), translation.n_cached,
+            (t_end - t_translate) * 1000.0,
+            sorted(set(languages)),
+        )
 
         return [
             PipelineResult(
@@ -162,7 +232,18 @@ class SentimentPipeline:
         return self.predict_batch([text], batch_size=1, translation_batch_size=1)[0]
 
     def free(self) -> None:
-        """Release all three models."""
-        self.transliterator.free()
-        self.translator.free()
-        self.classifier.free()
+        """Release every loaded model. Idempotent.
+
+        Includes the roman-LID stage, which holds the largest single artifact in
+        the pipeline (IndicLID-BERT, ~1.1 GB) — it used to be left resident here
+        while the smaller models were released.
+        """
+        with self._lock:
+            if self._freed:
+                return
+            self._freed = True
+            self.roman_detector.free()
+            self.transliterator.free()
+            self.translator.free()
+            self.classifier.free()
+            logger.info("Pipeline models released.")

@@ -177,3 +177,17 @@ class RomanLanguageDetector:
         except Exception as exc:
             logger.warning("Roman LID failed for text: %s", exc)
             return None
+
+    def free(self) -> None:
+        """Release the FTR and BERT models. Idempotent.
+
+        IndicLID-BERT is the largest artifact the pipeline loads (~1.1 GB), so
+        this matters on shutdown even though the stage itself is optional.
+        """
+        import torch
+
+        self.ftr = None
+        self.bert = None
+        self.tokenizer = None
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()

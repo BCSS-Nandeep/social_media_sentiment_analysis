@@ -101,6 +101,23 @@ TRANSLATION_BATCH_SIZE: int = int(os.getenv("SENTIMENT_TRANSLATION_BATCH_SIZE", 
 TRANSLATION_MAX_LENGTH: int = 256
 TRANSLATION_NUM_BEAMS: int = 1  # raise to 4-5 for higher quality (slower on CPU)
 
+# Runaway-generation guard. A translation is never much longer than its source,
+# but a degenerate decode (e.g. IndicTrans2 running without IndicTransToolkit's
+# preprocessing) can loop until it hits TRANSLATION_MAX_LENGTH — paying the full
+# 256-token decode for a 10-word post. Cap each batch at
+# ``ratio * longest_source_in_batch + margin`` new tokens instead. Generous by
+# default, so it only bites on runaway decodes; every clamp is logged with the
+# source length so the effect is measurable. Set the ratio to 0 to disable and
+# fall back to a flat TRANSLATION_MAX_LENGTH budget.
+TRANSLATION_LENGTH_RATIO: float = float(os.getenv("SENTIMENT_TRANSLATION_LENGTH_RATIO", "2.5"))
+TRANSLATION_LENGTH_MARGIN: int = int(os.getenv("SENTIMENT_TRANSLATION_LENGTH_MARGIN", "32"))
+
+# Translation memoization, keyed on (source language, exact source text).
+# Translation dominates end-to-end latency, so a caller that retries a post
+# after a client-side timeout gets the completed work for free instead of
+# paying for it twice. 0 disables the cache.
+TRANSLATION_CACHE_SIZE: int = int(os.getenv("SENTIMENT_TRANSLATION_CACHE_SIZE", "2048"))
+
 # Winner rule for the translation stage, evaluated in order. Metrics that are
 # unavailable for the current run (e.g. COMET not installed) are skipped.
 TRANSLATION_WINNER_PRIORITY: tuple[str, ...] = ("comet", "chrf", "bleu", "avg_time_ms")
@@ -152,6 +169,23 @@ SEED: int = 42
 BATCH_SIZE: int = int(os.getenv("SENTIMENT_BATCH_SIZE", "16"))
 MAX_LENGTH: int = int(os.getenv("SENTIMENT_MAX_LENGTH", "128"))
 DEVICE: str = os.getenv("SENTIMENT_DEVICE", "auto")  # "auto" | "cuda" | "cpu"
+
+# Intra-op thread count for CPU inference. torch's default is the visible core
+# count, which is wrong inside a cgroup-limited container (it sees the host's
+# cores, oversubscribes, and thrashes) — a common cause of order-of-magnitude
+# CPU translation slowdowns. 0 keeps torch's own default; the effective value is
+# logged at startup either way so it can be checked against the container limit.
+TORCH_NUM_THREADS: int = int(os.getenv("SENTIMENT_TORCH_NUM_THREADS", "0"))
+
+# --------------------------------------------------------------------------- #
+# HTTP service limits (api_server.py)
+# --------------------------------------------------------------------------- #
+# Request-size ceilings. Defaults are far above what the current caller sends
+# (one post per request) so they reject only genuinely abusive payloads, never
+# ordinary traffic. Requests over a limit get 413 with the limit in the message.
+API_MAX_TEXTS: int = int(os.getenv("SENTIMENT_API_MAX_TEXTS", "256"))
+API_MAX_TEXT_CHARS: int = int(os.getenv("SENTIMENT_API_MAX_TEXT_CHARS", "5000"))
+API_MAX_TOTAL_CHARS: int = int(os.getenv("SENTIMENT_API_MAX_TOTAL_CHARS", "200000"))
 
 # --------------------------------------------------------------------------- #
 # Language detection

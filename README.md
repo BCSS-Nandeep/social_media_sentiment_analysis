@@ -200,7 +200,44 @@ curl -X POST http://localhost:8003/analyze \
   -d '{"texts": ["ప్రభుత్వం ప్రకటించిన కొత్త పథకం చాలా బాగుంది"]}'
 ```
 
-`GET /health` reports `{"healthy": true, "device": "cuda"|"cpu"}` once the models finish loading. `HF_TOKEN` (for the gated IndicTrans2 model) is read from `.env`; `SENTIMENT_DEVICE` / `SENTIMENT_BATCH_SIZE` / `SENTIMENT_TRANSLATION_BATCH_SIZE` / `SENTIMENT_MAX_LENGTH` optionally override `config.py`'s defaults the same way.
+`GET /health` reports `{"healthy": true, "device": "cuda"|"cpu"}` once the models finish loading, plus two additive keys: `stages` (which optional stages actually came up) and `limits` (the request ceilings below). `HF_TOKEN` (for the gated IndicTrans2 model) is read from `.env`; `SENTIMENT_DEVICE` / `SENTIMENT_BATCH_SIZE` / `SENTIMENT_TRANSLATION_BATCH_SIZE` / `SENTIMENT_MAX_LENGTH` optionally override `config.py`'s defaults the same way.
+
+### Send posts in batches
+
+`/analyze` takes a **list**, and the whole pipeline is batched end to end —
+translation groups the batch by source language and decodes it in one
+`generate()` call, then sentiment classifies in one forward pass. One request
+carrying 25 posts therefore costs far less than 25 requests carrying one post
+each, which pay the per-call setup cost 25 times over.
+
+A caller sending one post per request is the single largest throughput loss in
+the current deployment, and it is fixed on the caller's side — the service has
+always accepted batches.
+
+### Request limits
+
+Oversized requests are rejected with `413` and a message naming the limit.
+Defaults are far above ordinary traffic and are env-overridable:
+
+| Variable | Default | Limit |
+| --- | --- | --- |
+| `SENTIMENT_API_MAX_TEXTS` | 256 | texts per request |
+| `SENTIMENT_API_MAX_TEXT_CHARS` | 5000 | characters per text |
+| `SENTIMENT_API_MAX_TOTAL_CHARS` | 200000 | characters per request |
+
+### Latency and throughput tuning
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `SENTIMENT_TRANSLATION_CACHE_SIZE` | 2048 | Memoizes translations on `(language, exact source text)`. A post retried after a client-side timeout is served from cache instead of being translated again. 0 disables. |
+| `SENTIMENT_TRANSLATION_LENGTH_RATIO` | 2.5 | Caps generation at `ratio x longest_source_tokens + margin` new tokens instead of a flat 256, so a degenerate decode can't burn the full budget on a short post. Every clamp is logged with the source length. 0 restores the flat budget. |
+| `SENTIMENT_TRANSLATION_LENGTH_MARGIN` | 32 | Constant added to the above. |
+| `SENTIMENT_TORCH_NUM_THREADS` | 0 (torch default) | CPU intra-op threads. Worth setting explicitly in a CPU deployment: torch sizes its default from the *visible* core count, so inside a cgroup-limited container it oversubscribes and contends. The effective value is logged at startup either way. |
+
+Inference is serialized on a lock — the pipeline is one set of torch modules
+and cannot be driven from two threads at once. Requests queue, and any wait
+over a second is logged, so a slow response can be attributed to saturation
+rather than to the model. To serve more concurrency, run more replicas.
 
 A caller integrates purely through this HTTP contract — one example is
 SOCKEYE's backend, which can route sentiment requests here via
