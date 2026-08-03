@@ -17,6 +17,34 @@ sacrebleu>=2.4
 sentencepiece>=0.2
 accelerate>=0.28
 IndicTransToolkit>=1.0 ; python_version < "3.14"
+# IndicTransToolkit's own preprocessing imports indicnlp.tokenize at runtime
+# but doesn't declare this as an install dependency — without it, translation
+# silently degrades to lower-quality plain tag-prefixing (still works, just
+# worse output) instead of failing loudly. Pin it explicitly.
+indic-nlp-library>=0.92
 # Optional — enables COMET / CometKiwi translation quality scores (heavy install;
 # CometKiwi is additionally a gated HuggingFace model requiring `huggingface-cli login`):
 # unbabel-comet>=2.2
+
+# HTTP service (api_server.py) — exposes the production pipeline for SOCKEYE's
+# backend (SENTIMENT_ANALYSIS=CUSTOM).
+fastapi>=0.110.0
+uvicorn>=0.27.0
+python-dotenv>=1.0.0
+
+# Romanized-Indic transliteration (src/transliteration.py) — IndicXlit, loaded
+# directly via fairseq (NOT the `ai4bharat-transliteration` PyPI wrapper: it
+# unconditionally imports urduhack -> tensorflow, which segfaults in this
+# process once torch/transformers are already loaded — confirmed by testing).
+# Plain PyPI `fairseq` fails to build on Python >=3.12 (its setup.py needs
+# `distutils`, removed from the stdlib); fairseq-fixed is a community fork
+# that ships a working prebuilt wheel and is otherwise drop-in (same `fairseq`
+# import name).
+fairseq-fixed>=0.12.3.1 ; python_version >= "3.12"
+fairseq>=0.12.2 ; python_version < "3.12"
+
+# Roman-script language ID (src/lid_roman.py) — AI4Bharat IndicLID-FTR,
+# distinguishes romanized Indic text from genuine English. Plain `fasttext`
+# has no prebuilt wheels for recent Python; fasttext-wheel is the same
+# library, just pre-built.
+fasttext-wheel>=0.9.2

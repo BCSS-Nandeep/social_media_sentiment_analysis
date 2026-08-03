@@ -8,9 +8,14 @@ Supported families:
     * ``nllb``        — Meta NLLB-200 (``src_lang`` + forced BOS token).
     * ``madlad``      — Google MADLAD-400 ("<2en> " prefix).
 
-Posts already in English — and posts whose detected language has no FLORES
-mapping (e.g. misdetected romanized code-mix) — are passed through unchanged
-with zero translation latency.
+Genuine English posts (English content, typed in English) bypass this stage
+entirely — no translation needed. Everything else routes through the model,
+including romanized Indic languages ("Hinglish" etc.), which by the time
+they reach this module have already been converted to native script by
+src/transliteration.py (IndicXlit) upstream in pipeline.py. Only a post whose
+detected language has no FLORES mapping at all (detection failed / returned
+'unknown') passes through unchanged, since there is no source-language token
+to translate from.
 """
 from __future__ import annotations
 
@@ -97,6 +102,7 @@ class Translator:
         self.model.eval()
 
         self._indic_processor = None
+        self._indic_processor_broken_langs: set[str] = set()
         if cfg.family == "indictrans2":
             try:
                 from IndicTransToolkit.processor import IndicProcessor
@@ -116,10 +122,29 @@ class Translator:
     # ------------------------------------------------------------------ #
     def _prepare_batch(self, batch: list[str], src_flores: str) -> list[str] | dict:
         if self.cfg.family == "indictrans2":
-            if self._indic_processor is not None:
-                return self._indic_processor.preprocess_batch(
-                    batch, src_lang=src_flores, tgt_lang=TARGET_FLORES
-                )
+            use_processor = (
+                self._indic_processor is not None
+                and src_flores not in self._indic_processor_broken_langs
+            )
+            if use_processor:
+                try:
+                    return self._indic_processor.preprocess_batch(
+                        batch, src_lang=src_flores, tgt_lang=TARGET_FLORES
+                    )
+                except Exception as exc:
+                    # e.g. IndicTransToolkit's Urdu normalizer needs the
+                    # `urduhack` package, which isn't installed here (it
+                    # transitively pulls in TensorFlow, which segfaults
+                    # alongside the fairseq-based transliteration stage
+                    # already running in this process). Degrade to plain tag
+                    # prefixing for this language only — every other language
+                    # keeps the better IndicTransToolkit preprocessing.
+                    self._indic_processor_broken_langs.add(src_flores)
+                    logger.warning(
+                        "IndicTransToolkit preprocessing failed for %s (%s) — "
+                        "falling back to plain tag prefixing for this language.",
+                        src_flores, exc,
+                    )
             return [f"{src_flores} {TARGET_FLORES} {text}" for text in batch]
         if self.cfg.family == "madlad":
             return [f"<2en> {text}" for text in batch]
@@ -151,6 +176,14 @@ class Translator:
         translated = np.zeros(n, dtype=bool)
 
         # Group indices by source language so each batch is monolingual.
+        # 'en' is bypassed: genuine English (content AND script both English)
+        # needs no translation. Every other language routes through the model,
+        # INCLUDING romanized Indic languages once script_detection +
+        # transliteration.py have already converted them to native script
+        # upstream in pipeline.py — 'hi' text arriving here is native Devanagari
+        # whether the original post was typed in Devanagari or Latin letters.
+        # Only a language with no FLORES mapping at all (detection failed /
+        # returned 'unknown') has no source token to translate from.
         groups: dict[str, list[int]] = defaultdict(list)
         skipped_langs: set[str] = set()
         for idx, lang in enumerate(languages):

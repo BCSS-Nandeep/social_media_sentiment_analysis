@@ -8,12 +8,10 @@
           ▼
   Text Preprocessing + Language Detection
           │
-   ┌──────┴───────────────┐
-   │ English?             │ Indian language?
-   ▼                      ▼
- bypass          IndicTrans2 (AI4Bharat)
-   │              Indic → English
-   └──────┬───────────────┘
+          ▼
+  IndicTrans2 (AI4Bharat)
+  src=detected language, tgt=English (English posts: eng_Latn -> eng_Latn)
+          │
           ▼
   Cardiff Twitter RoBERTa
  (cardiffnlp/twitter-roberta-base-sentiment-latest)
@@ -22,6 +20,10 @@
  Positive / Neutral / Negative
  + language, English text, confidence, inference time
 ```
+
+Every post goes through both stages — no language is bypassed (not even
+English). The only exception is a post whose language can't be detected at
+all (`unknown`), since there is no source-language token to translate from.
 
 ## How to run — step by step
 
@@ -157,6 +159,20 @@ pipeline = SentimentPipeline()          # loads IndicTrans2 + Cardiff once
 result = pipeline.predict_one("रैली में भीड़ थी लेकिन भाषण में कुछ नया नहीं था।")
 print(result.language, result.sentiment, result.confidence, result.english_text)
 ```
+
+Or as an HTTP service, for SOCKEYE's backend (`SENTIMENT_ANALYSIS=CUSTOM`):
+
+```bash
+uvicorn api_server:app --host 0.0.0.0 --port 8003
+```
+
+```bash
+curl -X POST http://localhost:8003/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"texts": ["ప్రభుత్వం ప్రకటించిన కొత్త పథకం చాలా బాగుంది"]}'
+```
+
+`GET /health` reports `{"healthy": true, "device": "cuda"|"cpu"}` once the models finish loading. `HF_TOKEN` (for the gated IndicTrans2 model) is read from `.env`; `SENTIMENT_DEVICE` / `SENTIMENT_BATCH_SIZE` / `SENTIMENT_TRANSLATION_BATCH_SIZE` / `SENTIMENT_MAX_LENGTH` optionally override `config.py`'s defaults the same way.
 
 Only these two models are loaded in production. The benchmark harness below is
 retained for reference — it is how this architecture was selected — and can be
@@ -330,8 +346,8 @@ average inference time.
   synthetic Neutral probability `2·min(p_neg, p_pos)` is inserted and rows are
   renormalized, so near-ties between the poles read as Neutral (tunable via
   `NEUTRAL_UNCERTAINTY_SCALE` in config). This is flagged in every report.
-- English posts skip translation (zero translation latency); BLEU/chrF/COMET
-  are computed only over posts that were actually translated.
+- English posts are translated too (eng_Latn -> eng_Latn, no bypass); BLEU/chrF/COMET
+  are computed only over posts whose detected language had a FLORES mapping.
 - Posts whose detected language has no FLORES mapping (e.g. romanized
   code-mixed text misdetected as a European language) are passed through
   untranslated with a warning.
@@ -361,5 +377,6 @@ social_sentiment_benchmark/
 ├── config.py                     # every path, model id and hyper-parameter
 ├── requirements.txt
 ├── predict.py                    # ★ production CLI (single post or CSV batch)
+├── api_server.py                 # ★ production HTTP service (FastAPI) — see above
 └── run.py                        # benchmark CLI
 ```

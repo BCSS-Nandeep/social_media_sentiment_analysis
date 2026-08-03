@@ -17,8 +17,15 @@ Every model is configured here; no module hardcodes a model name.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Loads .env (e.g. HF_TOKEN for the gated IndicTrans2 model) into the process
+# environment — same load_dotenv() + os.getenv() convention as rag_pipeline.
+load_dotenv()
 
 # --------------------------------------------------------------------------- #
 # Paths — always resolved relative to this file (no hardcoded absolute paths).
@@ -90,7 +97,7 @@ FLORES_CODES: dict[str, str] = {
 }
 TARGET_FLORES: str = "eng_Latn"
 
-TRANSLATION_BATCH_SIZE: int = 8
+TRANSLATION_BATCH_SIZE: int = int(os.getenv("SENTIMENT_TRANSLATION_BATCH_SIZE", "8"))
 TRANSLATION_MAX_LENGTH: int = 256
 TRANSLATION_NUM_BEAMS: int = 1  # raise to 4-5 for higher quality (slower on CPU)
 
@@ -142,9 +149,9 @@ NEUTRAL_UNCERTAINTY_SCALE: float = 2.0
 # Shared inference / reproducibility settings
 # --------------------------------------------------------------------------- #
 SEED: int = 42
-BATCH_SIZE: int = 16
-MAX_LENGTH: int = 128
-DEVICE: str = "auto"  # "auto" | "cuda" | "cpu"
+BATCH_SIZE: int = int(os.getenv("SENTIMENT_BATCH_SIZE", "16"))
+MAX_LENGTH: int = int(os.getenv("SENTIMENT_MAX_LENGTH", "128"))
+DEVICE: str = os.getenv("SENTIMENT_DEVICE", "auto")  # "auto" | "cuda" | "cpu"
 
 # --------------------------------------------------------------------------- #
 # Language detection
