@@ -1,16 +1,36 @@
-# Multilingual Social Sentiment — Production Pipeline
+# Multilingual Social Sentiment — Standalone Service
 
-**Finalized architecture (selected by benchmark):**
+An **independent microservice**. Not part of any other application's
+codebase or deployment — it has its own repository, its own dependencies, its
+own git history, and is consumed purely over HTTP. Any caller (SOCKEYE or
+otherwise) talks to it through `POST /analyze` / `GET /health`; nothing about
+this service assumes a specific consumer.
+
+**Finalized architecture (selected by benchmark, extended with romanized-Indic support):**
 
 ```
    Social Media Post
           │
           ▼
-  Text Preprocessing + Language Detection
+  Text Preprocessing + Language Detection (lingua/langdetect)
           │
           ▼
+  Latin-script text? ── yes ──▶ IndicLID (AI4Bharat fastText + IndicBERT rerank)
+          │                     refines "en" -> actual Indic language for
+          │                     romanized text (Hinglish, Roman-Telugu, ...)
+          ▼ no
+          │◀────────────────────────────┘
+          ▼
+  Romanized Indic? ── yes ──▶ IndicXlit (AI4Bharat) — Roman -> native script
+          │
+          ▼ no / already native
+          │◀────────────────────────────┘
+          ▼
+  Genuine English? ── yes ──▶ bypass translation
+          │
+          ▼ no
   IndicTrans2 (AI4Bharat)
-  src=detected language, tgt=English (English posts: eng_Latn -> eng_Latn)
+  src=detected/refined language, tgt=English
           │
           ▼
   Cardiff Twitter RoBERTa
@@ -18,12 +38,16 @@
           │
           ▼
  Positive / Neutral / Negative
- + language, English text, confidence, inference time
+ + language, English text, was_translated, was_transliterated, confidence, timings
 ```
 
-Every post goes through both stages — no language is bypassed (not even
-English). The only exception is a post whose language can't be detected at
-all (`unknown`), since there is no source-language token to translate from.
+Only genuine English is bypassed from translation. Romanized Indic text
+(Latin script, Indic language — e.g. "nenu bాgunna" in Roman-Telugu) is never
+bypassed: it is first transliterated to native script by IndicXlit, then
+still routes through IndicTrans2 like any other Indic-language post. The
+general language detector (lingua/langdetect) has no romanized-language
+profiles and misreads this text as English — IndicLID exists specifically to
+catch and correct that before the bypass decision is made.
 
 ## How to run — step by step
 
@@ -160,7 +184,11 @@ result = pipeline.predict_one("रैली में भीड़ थी ले
 print(result.language, result.sentiment, result.confidence, result.english_text)
 ```
 
-Or as an HTTP service, for SOCKEYE's backend (`SENTIMENT_ANALYSIS=CUSTOM`):
+## Running as a service
+
+This is the primary way the pipeline is meant to be consumed — as a standalone
+HTTP service, independent of and decoupled from any caller's own codebase or
+deploy process:
 
 ```bash
 uvicorn api_server:app --host 0.0.0.0 --port 8003
@@ -173,6 +201,12 @@ curl -X POST http://localhost:8003/analyze \
 ```
 
 `GET /health` reports `{"healthy": true, "device": "cuda"|"cpu"}` once the models finish loading. `HF_TOKEN` (for the gated IndicTrans2 model) is read from `.env`; `SENTIMENT_DEVICE` / `SENTIMENT_BATCH_SIZE` / `SENTIMENT_TRANSLATION_BATCH_SIZE` / `SENTIMENT_MAX_LENGTH` optionally override `config.py`'s defaults the same way.
+
+A caller integrates purely through this HTTP contract — one example is
+SOCKEYE's backend, which can route sentiment requests here via
+`SENTIMENT_ANALYSIS=CUSTOM` + `CUSTOM_SENTIMENT_URL` pointed at this service's
+`/analyze` endpoint — but this repo has no dependency on SOCKEYE or any other
+consumer; it can be deployed and versioned on its own.
 
 Only these two models are loaded in production. The benchmark harness below is
 retained for reference — it is how this architecture was selected — and can be
@@ -366,6 +400,9 @@ social_sentiment_benchmark/
 ├── src/
 │   ├── preprocessing.py          # cleaning + validation (emojis preserved)
 │   ├── language_detector.py      # lingua → langdetect → 'unknown' fallback chain
+│   ├── script_detection.py       # Unicode-range script detection (no ML)
+│   ├── lid_roman.py              # IndicLID (fastText + IndicBERT rerank) — romanized-Indic vs genuine English
+│   ├── transliteration.py        # IndicXlit (AI4Bharat, via fairseq) — Roman -> native script
 │   ├── translation.py            # IndicTrans2 / NLLB / MADLAD translation pipelines
 │   ├── translation_metrics.py    # BLEU, chrF, COMET, agreement, winner rule
 │   ├── inference.py              # sentiment models, label mapping, binary→3-class
