@@ -230,6 +230,7 @@ def _run_pipeline(texts: list[str], request_id: int) -> list:
                 texts,
                 batch_size=config.BATCH_SIZE,
                 translation_batch_size=config.TRANSLATION_BATCH_SIZE,
+                request_id=request_id,
             )
         except Exception:
             logger.exception(

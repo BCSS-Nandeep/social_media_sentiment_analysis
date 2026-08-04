@@ -162,38 +162,58 @@ class SentimentPipeline:
         texts: list[str],
         batch_size: int = config.BATCH_SIZE,
         translation_batch_size: int = config.TRANSLATION_BATCH_SIZE,
+        request_id: object = None,
     ) -> list[PipelineResult]:
         """Run the full pipeline over a list of posts (order preserved).
 
-        Serialized on the pipeline lock — see the class docstring.
+        Serialized on the pipeline lock — see the class docstring. `request_id`
+        is optional and purely for log correlation with the caller's own
+        request log (e.g. api_server.py's "req N: received" line) — pass it
+        through when available so a hang's last logged checkpoint says which
+        request it was, not just which stage.
         """
         with self._lock:
-            return self._predict_batch_locked(texts, batch_size, translation_batch_size)
+            return self._predict_batch_locked(texts, batch_size, translation_batch_size, request_id)
 
     def _predict_batch_locked(
-        self, texts: list[str], batch_size: int, translation_batch_size: int
+        self, texts: list[str], batch_size: int, translation_batch_size: int,
+        request_id: object = None,
     ) -> list[PipelineResult]:
         if self._freed:
             raise RuntimeError("SentimentPipeline.free() has been called; reload the pipeline.")
+
+        # Stage checkpoints: logged as each stage starts, not just in the
+        # summary line at the end. A hang inside any one stage means the
+        # summary line never fires — without these, the logs show a request
+        # was "received" and then nothing, with no way to tell which of the
+        # five stages below it died in. The last "stage=" line before a hang
+        # names the culprit.
+        tag = f"req {request_id}" if request_id is not None else "batch"
 
         # Per-stage wall-clock, logged at the end of every batch. The result
         # objects only carry translation and sentiment timings, so without this
         # a slow request gives no way to tell which stage actually cost the time.
         t_start = time.perf_counter()
+        logger.info("%s: stage=detect (%d text(s))", tag, len(texts))
         cleaned = [clean_text(text) for text in texts]
         languages = self.detector.detect_batch(cleaned)
         t_detect = time.perf_counter()
+        logger.info("%s: stage=roman_lid", tag)
         languages = self._refine_latin_languages(cleaned, languages)
         t_refine = time.perf_counter()
+        logger.info("%s: stage=transliterate", tag)
         working_texts, was_transliterated = self._transliterate_batch(cleaned, languages)
         t_xlit = time.perf_counter()
 
+        logger.info("%s: stage=translate", tag)
         translation = self.translator.translate(
             working_texts, languages, batch_size=translation_batch_size
         )
         t_translate = time.perf_counter()
+        logger.info("%s: stage=sentiment", tag)
         sentiment = self.classifier.predict(translation.texts, batch_size=batch_size)
         t_end = time.perf_counter()
+        logger.info("%s: stage=done", tag)
 
         logger.info(
             "Batch of %d done in %.0f ms — detect %.0f | roman-lid %.0f | "
