@@ -286,6 +286,33 @@ curl -X POST http://localhost:8003/analyze/intelligence \
   -d '{"texts": ["ప్రభుత్వం ప్రకటించిన కొత్త పథకం చాలా బాగుంది"]}'
 ```
 
+Optional request fields (all ignored by `/analyze`):
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `policy_pack` | built-in taxonomy | Caller category allowlist (`id` + optional `definition`/`severity`/`keywords`), plus `unknown_label` |
+| `intent_mode` | `enum` | `enum` = fixed intent labels; `free` = 2–8 word phrase + `intent_label` enum |
+| `timeout_s` | `OLLAMA_TIMEOUT_S` | Per-request Ollama timeout override (clamped to 5–600) |
+
+Example with a SOCKEYE-style pack:
+
+```bash
+curl -X POST http://localhost:8003/analyze/intelligence \
+  -H "Content-Type: application/json" \
+  -d '{
+    "texts": ["..."],
+    "intent_mode": "free",
+    "policy_pack": {
+      "name": "sockeye-policy-mapping",
+      "unknown_label": "Normal",
+      "categories": [
+        {"id": "Hate_Speech", "definition": "Content attacking a protected group."},
+        {"id": "Normal", "definition": "Harmless or neutral content."}
+      ]
+    }
+  }'
+```
+
 Each result carries every `/analyze` key plus an `intelligence` object:
 
 ```json
@@ -294,17 +321,30 @@ Each result carries every `/analyze` key plus an `intelligence` object:
   "sentiment": "Negative", "confidence": 0.97,
   "was_translated": true, "was_transliterated": false,
   "intelligence": {
-    "category": "Protest", "intent": "Protest Mobilization", "risk_score": 72,
+    "category": "Protest", "intent": "Protest Mobilization",
+    "intent_label": "Protest Mobilization",
+    "risk_score": 72,
     "reasoning": "...", "summary": "...", "recommended_action": "Monitor",
     "evidence_confidence": "high",
     "signals": ["code_mixed"], "source": "provider",
-    "model": "llama3.1:8b", "latency_ms": 1840.2
+    "model": "qwen2.5:7b", "latency_ms": 1840.2,
+    "policy_pack_fingerprint": "sha256:…",
+    "schema_enforced": true
   }
 }
 ```
 
+`source` is one of `provider` | `triage` | `error`. SOCKEYE clients must treat
+`error` as failure (equivalent to a null LLM result), not as a valid verdict.
+
 Both output sets belong in the stored analysis record. `predict.py --intelligence`
 writes them as columns alongside the sentiment columns.
+
+Contract checks (no Ollama required):
+
+```bash
+python verify_intelligence_contract.py
+```
 
 ## Configuration
 
@@ -316,6 +356,7 @@ writes them as columns alongside the sentiment columns.
 | `OLLAMA_RETRIES` | 2 | Retries on transport failure or unparseable output |
 | `OLLAMA_CONCURRENCY` | 4 | Parallel calls per batch |
 | `OLLAMA_TEMPERATURE` | 0 | 0 for reproducible assessments |
+| `OLLAMA_NUM_PREDICT` | 512 | Max generation tokens |
 | `OLLAMA_JSON_SCHEMA` | 1 | Constrain decoding to the schema (Ollama ≥ 0.5); auto-downgrades if the server rejects it |
 | `SENTIMENT_INTELLIGENCE_PROVIDER` | `ollama` | Selects the provider from the registry |
 

@@ -216,6 +216,9 @@ OLLAMA_RETRIES: int = int(os.getenv("OLLAMA_RETRIES", "2"))
 OLLAMA_CONCURRENCY: int = int(os.getenv("OLLAMA_CONCURRENCY", "4"))
 OLLAMA_TEMPERATURE: float = float(os.getenv("OLLAMA_TEMPERATURE", "0"))
 OLLAMA_NUM_CTX: int = int(os.getenv("OLLAMA_NUM_CTX", "4096"))
+# Bounds worst-case generation length (summary + intent_label add tokens vs SOCKEYE's
+# old 240-token cap). Still small enough that a degenerate decode cannot run away.
+OLLAMA_NUM_PREDICT: int = int(os.getenv("OLLAMA_NUM_PREDICT", "512"))
 # Ollama >= 0.5 constrains generation to a JSON schema, which is far more
 # reliable than format="json" alone. Set to 0 for older servers; the provider
 # also falls back automatically if the server rejects a schema.
@@ -223,6 +226,8 @@ OLLAMA_JSON_SCHEMA: bool = os.getenv("OLLAMA_JSON_SCHEMA", "1") not in ("0", "fa
 
 # Taxonomies. "Unknown" is always additionally permitted for category/intent —
 # the guard rails require it rather than a guess when evidence is insufficient.
+# Callers may replace CATEGORY_LABELS at request time via a policy_pack
+# (see src/intelligence.py); these remain the default when no pack is supplied.
 INTENT_LABELS: tuple[str, ...] = (
     "Information", "Opinion", "Protest Mobilization", "Call to Action", "Threat",
     "Recruitment", "Rumor", "Propaganda", "Satire", "Misinformation",
@@ -246,6 +251,12 @@ INTELLIGENCE_SHORT_WORDS: int = int(os.getenv("SENTIMENT_INTELLIGENCE_SHORT_WORD
 # Fraction of alphabetic characters in the minority script above which a post
 # counts as genuinely code-mixed rather than incidental.
 INTELLIGENCE_CODEMIX_RATIO: float = float(os.getenv("SENTIMENT_INTELLIGENCE_CODEMIX_RATIO", "0.15"))
+# Free-form intent (intent_mode=free) is clamped to this many words server-side.
+INTELLIGENCE_INTENT_MAX_WORDS: int = int(os.getenv("SENTIMENT_INTELLIGENCE_INTENT_MAX_WORDS", "8"))
+# Hard ceiling on categories accepted in a caller-supplied policy_pack.
+INTELLIGENCE_MAX_POLICY_CATEGORIES: int = int(
+    os.getenv("SENTIMENT_INTELLIGENCE_MAX_POLICY_CATEGORIES", "128")
+)
 
 # --------------------------------------------------------------------------- #
 # Language detection

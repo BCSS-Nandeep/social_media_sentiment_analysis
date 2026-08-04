@@ -20,7 +20,11 @@ existing consumers that read `healthy` / `device` are unaffected.
 
 The intelligence layer is a SEPARATE endpoint, so /analyze keeps its exact
 request schema, response keys and latency:
-    POST /analyze/intelligence  {"texts": [str, ...]}
+    POST /analyze/intelligence
+        {"texts": [str, ...],
+         "policy_pack"?: {...},   # optional caller taxonomy
+         "intent_mode"?: "enum"|"free",
+         "timeout_s"?: number}
         -> {"results": [ {<every /analyze key>, "intelligence": {...}} ]}
 
 That endpoint runs the identical deterministic pipeline and then adds the
@@ -45,11 +49,12 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any, Literal, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import config  # loads .env (HF_TOKEN) via load_dotenv()
 
@@ -130,12 +135,32 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="Social Media Sentiment Analysis", version="1.0.0", lifespan=lifespan
+    title="Social Media Sentiment Analysis", version="1.1.0", lifespan=lifespan
 )
+
+
+class PolicyCategoryModel(BaseModel):
+    id: str
+    definition: str = ""
+    severity: str = ""
+    keywords: list[str] = Field(default_factory=list)
+
+
+class PolicyPackModel(BaseModel):
+    name: str = "caller"
+    version: str = ""
+    fingerprint: str = ""
+    unknown_label: Optional[str] = None
+    categories: list[PolicyCategoryModel]
 
 
 class AnalyzeRequest(BaseModel):
     texts: list[str]
+    # Optional intelligence knobs — ignored by /analyze; used by /analyze/intelligence.
+    # Omitting every one reproduces the pre-policy-pack behaviour exactly.
+    policy_pack: Optional[PolicyPackModel] = None
+    intent_mode: Literal["enum", "free"] = "enum"
+    timeout_s: Optional[float] = None
 
 
 def _validate(texts: list[str]) -> int:
@@ -175,6 +200,27 @@ def _validate(texts: list[str]) -> int:
             ),
         )
     return total
+
+
+def _resolve_intelligence_options(req: AnalyzeRequest):
+    """Parse optional policy_pack / timeout; raise HTTPException on bad input."""
+    from src.intelligence import parse_policy_pack
+
+    pack_dict: dict[str, Any] | None = None
+    if req.policy_pack is not None:
+        pack_dict = req.policy_pack.model_dump()
+    try:
+        pack = parse_policy_pack(pack_dict)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    timeout_s = req.timeout_s
+    if timeout_s is not None:
+        if timeout_s < 5 or timeout_s > 600:
+            logger.info("Clamping timeout_s=%s into [5, 600]", timeout_s)
+        timeout_s = max(5.0, min(600.0, float(timeout_s)))
+
+    return pack, req.intent_mode, timeout_s
 
 
 @app.get("/health")
@@ -275,6 +321,9 @@ def analyze_intelligence(req: AnalyzeRequest):
     path — with an added `intelligence` object. Intelligence runs *outside* the
     inference lock: it is network-bound work against a separate host, so holding
     the lock through it would block sentiment inference for no reason.
+
+    Optional ``policy_pack`` / ``intent_mode`` / ``timeout_s`` customise the
+    Ollama taxonomy and timeout. Omitting them preserves legacy behaviour.
     """
     if _pipeline is None:
         raise HTTPException(status_code=503, detail="Pipeline still loading")
@@ -289,11 +338,14 @@ def analyze_intelligence(req: AnalyzeRequest):
     if not req.texts:
         return {"results": []}
 
+    pack, intent_mode, timeout_s = _resolve_intelligence_options(req)
+
     total_chars = _validate(req.texts)
     request_id = next(_request_ids)
     logger.info(
-        "req %d: received %d text(s), %d chars (with intelligence)",
+        "req %d: received %d text(s), %d chars (with intelligence; pack=%s fp=%s mode=%s)",
         request_id, len(req.texts), total_chars,
+        pack.name, pack.fingerprint[:19], intent_mode,
     )
 
     try:
@@ -303,7 +355,9 @@ def analyze_intelligence(req: AnalyzeRequest):
     payloads = [r.to_dict() for r in results]
 
     started = time.perf_counter()
-    records = _analyzer.analyze_batch(payloads)
+    records = _analyzer.analyze_batch(
+        payloads, pack=pack, intent_mode=intent_mode, timeout_s=timeout_s,
+    )
     logger.info(
         "req %d: intelligence completed in %.0f ms",
         request_id, (time.perf_counter() - started) * 1000.0,

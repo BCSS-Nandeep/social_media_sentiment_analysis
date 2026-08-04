@@ -10,26 +10,13 @@ translation, transliteration, sentiment and sentiment confidence arrive here as
 part deterministic classifiers cannot do: reading the translated text in context
 and producing an analyst-facing judgement.
 
-Design notes
-------------
-* **Additive.** Nothing in src/pipeline.py or the /analyze contract changes.
-  This stage consumes a PipelineResult (or its dict) and returns a separate
-  IntelligenceResult; callers store both.
-* **Pluggable.** :class:`IntelligenceProvider` is the extension point and
-  providers are looked up by name in :data:`PROVIDERS`, so another backend can
-  be added later without touching the sentiment pipeline.
-* **Never fatal.** Every failure path — provider down, timeout, malformed JSON,
-  label outside the taxonomy — degrades to a well-formed record with
-  ``risk_score`` 0 and ``recommended_action`` "Human Review". The intelligence
-  stage can never break a sentiment response.
-* **Deterministic where it can be.** Posts with no analyzable content at all
-  (empty after cleaning, emoji-only, media placeholder) are resolved by
-  :func:`triage` without a model call. Everything else goes to the model with
-  precomputed edge-case *signals* attached, so the model weighs them rather than
-  having to rediscover them.
+Callers may optionally supply a *policy pack* (category allowlist + definitions)
+so the prompt and Ollama JSON schema are built for that taxonomy. Omitting the
+pack reproduces the built-in CATEGORY_LABELS behaviour exactly.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -38,6 +25,7 @@ import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 
 import config
 from src.script_detection import LATIN_RANGE, UNICODE_RANGES
@@ -45,15 +33,254 @@ from src.script_detection import LATIN_RANGE, UNICODE_RANGES
 logger = logging.getLogger("benchmark.intelligence")
 
 _ALLOWED_INTENTS = frozenset(config.INTENT_LABELS) | {config.UNKNOWN_LABEL}
-_ALLOWED_CATEGORIES = frozenset(config.CATEGORY_LABELS) | {config.UNKNOWN_LABEL}
 _ALLOWED_ACTIONS = frozenset(config.ACTION_LABELS)
 _ALLOWED_EVIDENCE = frozenset(("high", "medium", "low"))
+_INTENT_MODES = frozenset(("enum", "free"))
 
 
 # --------------------------------------------------------------------------- #
-# Guard rails — sent as the system prompt on every single invocation
+# Policy pack — caller-supplied category taxonomy
 # --------------------------------------------------------------------------- #
-SYSTEM_PROMPT = f"""\
+@dataclass(frozen=True)
+class PolicyCategory:
+    id: str
+    definition: str = ""
+    severity: str = ""
+    keywords: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PolicyPack:
+    """Category allowlist used to build the system prompt and response schema."""
+
+    name: str
+    categories: tuple[PolicyCategory, ...]
+    unknown_label: str
+    version: str = ""
+    fingerprint: str = ""
+
+    def category_ids(self) -> tuple[str, ...]:
+        return tuple(c.id for c in self.categories)
+
+    def allowed_categories(self) -> frozenset[str]:
+        return frozenset(self.category_ids())
+
+
+def _canonical_pack_payload(
+    categories: tuple[PolicyCategory, ...], unknown_label: str, intent_mode: str
+) -> str:
+    payload = {
+        "unknown_label": unknown_label,
+        "intent_mode": intent_mode,
+        "categories": [
+            {
+                "id": c.id,
+                "definition": c.definition,
+                "severity": c.severity,
+                "keywords": list(c.keywords),
+            }
+            for c in categories
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def fingerprint_pack(
+    categories: tuple[PolicyCategory, ...], unknown_label: str, intent_mode: str = "enum"
+) -> str:
+    digest = hashlib.sha256(
+        _canonical_pack_payload(categories, unknown_label, intent_mode).encode("utf-8")
+    ).hexdigest()
+    return f"sha256:{digest}"
+
+
+def build_default_policy_pack() -> PolicyPack:
+    """Built-in taxonomy — identical behaviour to the pre-policy-pack service."""
+    categories = tuple(PolicyCategory(id=label) for label in config.CATEGORY_LABELS)
+    # Unknown is always selectable for insufficient evidence when using the default pack.
+    if config.UNKNOWN_LABEL not in {c.id for c in categories}:
+        categories = (*categories, PolicyCategory(id=config.UNKNOWN_LABEL))
+    return PolicyPack(
+        name="default",
+        categories=categories,
+        unknown_label=config.UNKNOWN_LABEL,
+        version="builtin",
+        fingerprint=fingerprint_pack(categories, config.UNKNOWN_LABEL, "enum"),
+    )
+
+
+DEFAULT_POLICY_PACK: PolicyPack = build_default_policy_pack()
+
+
+def parse_policy_pack(raw: dict | None) -> PolicyPack:
+    """Validate a caller-supplied pack dict, or return the default pack.
+
+    Raises ValueError with a caller-safe message on structural problems (API maps to 422).
+    """
+    if not raw:
+        return DEFAULT_POLICY_PACK
+
+    categories_raw = raw.get("categories")
+    if not isinstance(categories_raw, list) or not categories_raw:
+        raise ValueError("policy_pack.categories must be a non-empty list")
+    if len(categories_raw) > config.INTELLIGENCE_MAX_POLICY_CATEGORIES:
+        raise ValueError(
+            f"policy_pack.categories has {len(categories_raw)} entries "
+            f"(limit {config.INTELLIGENCE_MAX_POLICY_CATEGORIES})"
+        )
+
+    seen: set[str] = set()
+    categories: list[PolicyCategory] = []
+    for i, entry in enumerate(categories_raw):
+        if not isinstance(entry, dict):
+            raise ValueError(f"policy_pack.categories[{i}] must be an object")
+        cat_id = str(entry.get("id") or "").strip()
+        if not cat_id:
+            raise ValueError(f"policy_pack.categories[{i}].id is required")
+        if len(cat_id) > 96:
+            raise ValueError(f"policy_pack.categories[{i}].id exceeds 96 characters")
+        if cat_id in seen:
+            raise ValueError(f"policy_pack.categories contains duplicate id {cat_id!r}")
+        seen.add(cat_id)
+        definition = str(entry.get("definition") or "")
+        if len(definition) > 500:
+            definition = definition[:500]
+            logger.info("Truncated definition for category %s to 500 chars", cat_id)
+        keywords_raw = entry.get("keywords") or []
+        if not isinstance(keywords_raw, list):
+            raise ValueError(f"policy_pack.categories[{i}].keywords must be a list")
+        keywords = tuple(str(k).strip() for k in keywords_raw if str(k).strip())
+        categories.append(
+            PolicyCategory(
+                id=cat_id,
+                definition=definition,
+                severity=str(entry.get("severity") or "").strip(),
+                keywords=keywords,
+            )
+        )
+
+    unknown = str(raw.get("unknown_label") or "").strip()
+    cat_tuple = tuple(categories)
+    if unknown:
+        if unknown not in seen:
+            raise ValueError(
+                f"policy_pack.unknown_label {unknown!r} must be one of the category ids"
+            )
+    else:
+        # Append the service Unknown label when the caller did not nominate one.
+        unknown = config.UNKNOWN_LABEL
+        if unknown not in seen:
+            cat_tuple = (*cat_tuple, PolicyCategory(id=unknown))
+
+    name = str(raw.get("name") or "caller").strip() or "caller"
+    version = str(raw.get("version") or "").strip()
+    fp = fingerprint_pack(cat_tuple, unknown, "enum")
+    # Prefer a caller fingerprint only when it matches; otherwise use the canonical one.
+    caller_fp = str(raw.get("fingerprint") or "").strip()
+    if caller_fp and caller_fp != fp:
+        logger.info(
+            "policy_pack fingerprint mismatch (caller=%s computed=%s) — using computed",
+            caller_fp, fp,
+        )
+    return PolicyPack(
+        name=name,
+        categories=cat_tuple,
+        unknown_label=unknown,
+        version=version,
+        fingerprint=fp,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Dynamic system prompt + response schema
+# --------------------------------------------------------------------------- #
+def _category_block(pack: PolicyPack) -> str:
+    lines: list[str] = []
+    for cat in pack.categories:
+        if cat.definition:
+            lines.append(f"  {cat.id} — {cat.definition}")
+        else:
+            lines.append(f"  {cat.id}")
+        if cat.id == pack.unknown_label:
+            lines[-1] += (
+                " Use this when nothing else applies AND when the evidence is "
+                "insufficient to choose."
+            )
+    return "\n".join(lines)
+
+
+def _intent_block(intent_mode: str) -> str:
+    labels = ", ".join(config.INTENT_LABELS)
+    if intent_mode == "free":
+        return (
+            f"intent — a short free-form phrase of 2 to {config.INTELLIGENCE_INTENT_MAX_WORDS} "
+            "words naming what the author is trying to achieve "
+            "(e.g. 'mobilize a protest march', 'warn residents of flooding'). "
+            "Do not use a full sentence.\n"
+            f"intent_label — additionally classify that intent as exactly one of: "
+            f'{labels}, or "{config.UNKNOWN_LABEL}"'
+        )
+    return (
+        f"intent — exactly one of:\n  {labels}, or \"{config.UNKNOWN_LABEL}\""
+    )
+
+
+def _response_template(intent_mode: str) -> str:
+    if intent_mode == "free":
+        return (
+            '{"category": "...", "intent": "...", "intent_label": "...", '
+            '"risk_score": 0, "reasoning": "...", "summary": "...", '
+            '"recommended_action": "...", "evidence_confidence": "..."}'
+        )
+    return (
+        '{"category": "...", "intent": "...", "risk_score": 0, "reasoning": "...", '
+        '"summary": "...", "recommended_action": "...", "evidence_confidence": "..."}'
+    )
+
+
+def _insufficient_block(intent_mode: str, unknown: str) -> str:
+    if intent_mode == "free":
+        return (
+            f'  category           -> "{unknown}"\n'
+            f'  intent             -> "{unknown}" (or a short uncertain phrase)\n'
+            f'  intent_label       -> "{config.UNKNOWN_LABEL}"\n'
+            f"  risk_score         -> 0\n"
+            f"  reasoning          -> explain exactly what is missing\n"
+            f'  recommended_action -> "Human Review"\n'
+            f'  evidence_confidence-> "low"'
+        )
+    return (
+        f'  category           -> "{unknown}"\n'
+        f'  intent             -> "{config.UNKNOWN_LABEL}"\n'
+        f"  risk_score         -> 0\n"
+        f"  reasoning          -> explain exactly what is missing\n"
+        f'  recommended_action -> "Human Review"\n'
+        f'  evidence_confidence-> "low"'
+    )
+
+
+@lru_cache(maxsize=64)
+def build_system_prompt(fingerprint: str, intent_mode: str, pack_json: str) -> str:
+    """Memoized on fingerprint + intent_mode. pack_json is the canonical payload."""
+    del fingerprint  # used only as cache key companion; pack_json carries data
+    payload = json.loads(pack_json)
+    categories = tuple(
+        PolicyCategory(
+            id=c["id"],
+            definition=c.get("definition", ""),
+            severity=c.get("severity", ""),
+            keywords=tuple(c.get("keywords") or ()),
+        )
+        for c in payload["categories"]
+    )
+    pack = PolicyPack(
+        name="cached",
+        categories=categories,
+        unknown_label=payload["unknown_label"],
+        fingerprint="",
+    )
+    unknown = pack.unknown_label
+    return f"""\
 You are an intelligence analysis engine. You operate as the SECOND stage of a \
 pipeline. A deterministic NLP pipeline has already processed the post and its \
 results are given to you as established facts.
@@ -81,11 +308,10 @@ commentary before or after.
 
 YOUR TASKS — intent, category, contextual risk, reasoning, summary, action.
 
-intent — exactly one of:
-  {", ".join(config.INTENT_LABELS)}, or "{config.UNKNOWN_LABEL}"
+{_intent_block(intent_mode)}
 
-category — exactly one of:
-  {", ".join(config.CATEGORY_LABELS)}, or "{config.UNKNOWN_LABEL}"
+category — exactly one of the following. Choose the single best fit.
+{_category_block(pack)}
 
 risk_score — integer 0-100, a CONTEXTUAL risk assessment weighing:
   likelihood of public disorder, communal sensitivity, violence indicators,
@@ -108,7 +334,7 @@ evidence_confidence — "high", "medium" or "low": your confidence in the above
   given the amount and clarity of the evidence available.
 
 EDGE CASES — handle these explicitly rather than guessing:
-- Very short, ambiguous or incomplete posts: prefer "{config.UNKNOWN_LABEL}",
+- Very short, ambiguous or incomplete posts: prefer "{unknown}",
   lower the risk score, set evidence_confidence "low", recommend "Human Review".
 - Sarcasm or irony: mark uncertain rather than overconfident. Say so in reasoning.
 - Heavy code-mixing (Hinglish/Tenglish/etc.): translation may be imperfect;
@@ -129,33 +355,62 @@ EDGE CASES — handle these explicitly rather than guessing:
   reasoning, weigh the CONTENT for risk, and raise the recommended action.
 
 INSUFFICIENT EVIDENCE — when you cannot determine a field confidently:
-  category / intent  -> "{config.UNKNOWN_LABEL}"
-  risk_score         -> 0
-  reasoning          -> explain exactly what is missing
-  recommended_action -> "Human Review"
-  evidence_confidence-> "low"
+{_insufficient_block(intent_mode, unknown)}
 
 Return only this JSON object:
-{{"category": "...", "intent": "...", "risk_score": 0, "reasoning": "...", \
-"summary": "...", "recommended_action": "...", "evidence_confidence": "..."}}
+{_response_template(intent_mode)}
 """
 
-RESPONSE_SCHEMA: dict = {
-    "type": "object",
-    "properties": {
-        "category": {"type": "string", "enum": sorted(_ALLOWED_CATEGORIES)},
-        "intent": {"type": "string", "enum": sorted(_ALLOWED_INTENTS)},
+
+def _prompt_for(pack: PolicyPack, intent_mode: str) -> str:
+    pack_json = _canonical_pack_payload(pack.categories, pack.unknown_label, intent_mode)
+    fp = fingerprint_pack(pack.categories, pack.unknown_label, intent_mode)
+    return build_system_prompt(fp, intent_mode, pack_json)
+
+
+@lru_cache(maxsize=64)
+def build_response_schema(fingerprint: str, intent_mode: str, category_enum_json: str) -> dict:
+    del fingerprint
+    category_enum = json.loads(category_enum_json)
+    properties: dict = {
+        "category": {"type": "string", "enum": category_enum},
         "risk_score": {"type": "integer", "minimum": 0, "maximum": 100},
         "reasoning": {"type": "string"},
         "summary": {"type": "string"},
         "recommended_action": {"type": "string", "enum": sorted(_ALLOWED_ACTIONS)},
         "evidence_confidence": {"type": "string", "enum": sorted(_ALLOWED_EVIDENCE)},
-    },
-    "required": [
+    }
+    required = [
         "category", "intent", "risk_score", "reasoning", "summary",
         "recommended_action", "evidence_confidence",
-    ],
-}
+    ]
+    if intent_mode == "free":
+        properties["intent"] = {"type": "string"}
+        properties["intent_label"] = {
+            "type": "string",
+            "enum": sorted(_ALLOWED_INTENTS),
+        }
+        required.append("intent_label")
+    else:
+        properties["intent"] = {"type": "string", "enum": sorted(_ALLOWED_INTENTS)}
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+    }
+
+
+def _schema_for(pack: PolicyPack, intent_mode: str) -> dict:
+    fp = fingerprint_pack(pack.categories, pack.unknown_label, intent_mode)
+    return build_response_schema(
+        fp, intent_mode, json.dumps(sorted(pack.category_ids()))
+    )
+
+
+# Backward-compatible module-level defaults (no-pack path).
+SYSTEM_PROMPT: str = _prompt_for(DEFAULT_POLICY_PACK, "enum")
+RESPONSE_SCHEMA: dict = _schema_for(DEFAULT_POLICY_PACK, "enum")
+_ALLOWED_CATEGORIES = DEFAULT_POLICY_PACK.allowed_categories()
 
 
 @dataclass
@@ -173,20 +428,36 @@ class IntelligenceResult:
     source: str = "provider"          # provider | triage | error — how this was produced
     model: str = ""
     latency_ms: float = 0.0
+    intent_label: str = ""            # enum label; equals intent in enum mode
+    policy_pack_fingerprint: str = ""
+    schema_enforced: bool = True
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
 def _insufficient(
-    reasoning: str, signals: list[str], source: str, action: str = "Human Review"
+    reasoning: str,
+    signals: list[str],
+    source: str,
+    *,
+    pack: PolicyPack | None = None,
+    intent_mode: str = "enum",
+    action: str = "Human Review",
 ) -> IntelligenceResult:
     """The mandated shape for 'not enough evidence' — used by both triage and
     every failure path, so an unreadable post and an unreachable Ollama produce
     records a consumer can treat identically."""
+    pack = pack or DEFAULT_POLICY_PACK
+    unknown = pack.unknown_label
+    intent = unknown if intent_mode == "free" else (
+        config.UNKNOWN_LABEL if config.UNKNOWN_LABEL in _ALLOWED_INTENTS else unknown
+    )
+    intent_label = config.UNKNOWN_LABEL if intent_mode == "free" else intent
     return IntelligenceResult(
-        category=config.UNKNOWN_LABEL,
-        intent=config.UNKNOWN_LABEL,
+        category=unknown,
+        intent=intent,
+        intent_label=intent_label,
         risk_score=0,
         reasoning=reasoning,
         summary="No intelligence assessment could be produced for this post.",
@@ -194,6 +465,10 @@ def _insufficient(
         evidence_confidence="low",
         signals=signals,
         source=source,
+        policy_pack_fingerprint=fingerprint_pack(
+            pack.categories, pack.unknown_label, intent_mode
+        ),
+        schema_enforced=True,
     )
 
 
@@ -216,11 +491,7 @@ _SPAM_RE = re.compile(
 
 
 def _script_mix(text: str) -> float:
-    """Fraction of alphabetic characters in the minority script (Latin vs Indic).
-
-    0.0 means single-script. Uses the same Unicode ranges as the pipeline's
-    script detection so "code-mixed" means the same thing in both places.
-    """
+    """Fraction of alphabetic characters in the minority script (Latin vs Indic)."""
     latin = indic = 0
     for ch in text:
         if not ch.isalpha():
@@ -240,12 +511,7 @@ def _script_mix(text: str) -> float:
 
 
 def derive_signals(result: dict) -> list[str]:
-    """Cheap, deterministic edge-case flags attached to the prompt.
-
-    These do not decide anything — the model is told to weigh them. Computing
-    them here rather than asking the model to notice them makes the edge-case
-    handling auditable and consistent across posts.
-    """
+    """Cheap, deterministic edge-case flags attached to the prompt."""
     original = str(result.get("post_text") or "")
     english = str(result.get("english_text") or "")
     language = str(result.get("language") or "")
@@ -262,8 +528,6 @@ def derive_signals(result: dict) -> list[str]:
         signals.append("code_mixed")
     if result.get("was_transliterated"):
         signals.append("romanized_indic_transliterated")
-    # Not English, but translation never ran -> no FLORES mapping for the
-    # detected language, so english_text is really the untranslated source.
     if language not in ("en", "") and not result.get("was_translated"):
         signals.append("translation_unavailable")
     if language == "unknown":
@@ -274,58 +538,55 @@ def derive_signals(result: dict) -> list[str]:
         signals.append("possible_spam")
     if len(_URL_RE.findall(original)) >= 3:
         signals.append("link_heavy")
-    # Long runs of isolated single characters are the usual OCR signature.
     if len(words) >= 6 and sum(1 for w in words if len(w) == 1) / len(words) > 0.4:
         signals.append("possible_ocr_noise")
     return signals
 
 
-def triage(result: dict, signals: list[str]) -> IntelligenceResult | None:
-    """Resolve posts with no analyzable content without calling the model.
-
-    Returns ``None`` when the post should go to the provider. Only genuinely
-    contentless posts are short-circuited here — everything ambiguous is the
-    model's call, with the signals attached.
-    """
+def triage(
+    result: dict,
+    signals: list[str],
+    *,
+    pack: PolicyPack | None = None,
+    intent_mode: str = "enum",
+) -> IntelligenceResult | None:
+    """Resolve posts with no analyzable content without calling the model."""
+    pack = pack or DEFAULT_POLICY_PACK
     original = str(result.get("post_text") or "")
     english = str(result.get("english_text") or "")
 
     if not original.strip():
         return _insufficient(
             "The post is empty or contains only whitespace; there is no content to assess.",
-            signals, "triage", action="Ignore",
+            signals, "triage", pack=pack, intent_mode=intent_mode, action="Ignore",
         )
     if _MEDIA_RE.match(original.strip()):
         return _insufficient(
             "The post is a media placeholder with no accompanying text. The "
             "attached media itself was not available for assessment.",
-            signals, "triage",
+            signals, "triage", pack=pack, intent_mode=intent_mode,
         )
     stripped = _URL_RE.sub(" ", original)
     if not any(ch.isalnum() for ch in stripped):
-        # No letters or digits once links are removed: emoji-only, punctuation-
-        # only, or link-only. Sentiment may still exist; intelligence cannot.
         reason = (
             "The post contains no textual content once links are removed "
             "(emoji, punctuation or URL only), so intent, category and "
             "contextual risk cannot be assessed from text."
         )
-        return _insufficient(reason, signals, "triage", action="Ignore")
+        return _insufficient(
+            reason, signals, "triage", pack=pack, intent_mode=intent_mode, action="Ignore",
+        )
     if not english.strip():
         return _insufficient(
             "The pipeline produced no English text for this post, so no "
             "assessment can be made from the translation.",
-            signals, "triage",
+            signals, "triage", pack=pack, intent_mode=intent_mode,
         )
     return None
 
 
 def build_payload(result: dict, signals: list[str]) -> dict:
-    """The structured user message — pipeline facts, never bare text.
-
-    Long posts are truncated head+tail so the opening framing and any closing
-    call to action both survive; the `truncated` signal tells the model.
-    """
+    """The structured user message — pipeline facts, never bare text."""
     def clip(text: str) -> str:
         limit = config.INTELLIGENCE_MAX_TEXT_CHARS
         if len(text) <= limit:
@@ -350,22 +611,27 @@ def build_payload(result: dict, signals: list[str]) -> dict:
 # Providers
 # --------------------------------------------------------------------------- #
 class IntelligenceProvider(ABC):
-    """Extension point. Register new backends in :data:`PROVIDERS`.
-
-    Implementations return the raw decoded JSON object; validation, taxonomy
-    clamping and fallbacks are handled centrally by :class:`IntelligenceAnalyzer`,
-    so a new provider only has to make the call.
-    """
+    """Extension point. Register new backends in :data:`PROVIDERS`."""
 
     name: str = "provider"
 
     @abstractmethod
-    def generate(self, payload: dict) -> dict:
+    def generate(
+        self,
+        payload: dict,
+        *,
+        system_prompt: str,
+        schema: dict,
+        timeout_s: float | None = None,
+    ) -> dict:
         """Return the model's parsed JSON object, or raise."""
 
     @abstractmethod
     def describe(self) -> dict:
         """Static config, surfaced by /health."""
+
+    def schema_enforced(self) -> bool:
+        return True
 
     def health(self) -> bool:
         return True
@@ -387,7 +653,7 @@ class OllamaProvider(IntelligenceProvider):
         retries: int = config.OLLAMA_RETRIES,
         use_schema: bool = config.OLLAMA_JSON_SCHEMA,
     ) -> None:
-        import requests  # transitively present via huggingface_hub; pinned in requirements
+        import requests
 
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -395,7 +661,7 @@ class OllamaProvider(IntelligenceProvider):
         self.retries = max(0, retries)
         self._use_schema = use_schema
         self._session = requests.Session()
-        self._lock = threading.Lock()  # guards the schema-support downgrade
+        self._lock = threading.Lock()
 
     def describe(self) -> dict:
         return {
@@ -404,10 +670,14 @@ class OllamaProvider(IntelligenceProvider):
             "model": self.model,
             "timeout_s": self.timeout_s,
             "json_schema": self._use_schema,
+            "num_predict": config.OLLAMA_NUM_PREDICT,
+            "default_policy_pack_fingerprint": DEFAULT_POLICY_PACK.fingerprint,
         }
 
+    def schema_enforced(self) -> bool:
+        return self._use_schema
+
     def health(self) -> bool:
-        """True when the Ollama host answers. Never raises."""
         try:
             response = self._session.get(f"{self.base_url}/api/tags", timeout=5)
             return response.status_code == 200
@@ -415,37 +685,49 @@ class OllamaProvider(IntelligenceProvider):
             logger.warning("Ollama health check failed for %s: %s", self.base_url, exc)
             return False
 
-    def _body(self, payload: dict, use_schema: bool) -> dict:
+    def _body(
+        self,
+        payload: dict,
+        use_schema: bool,
+        system_prompt: str,
+        schema: dict,
+    ) -> dict:
         body = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
             "stream": False,
             "options": {
                 "temperature": config.OLLAMA_TEMPERATURE,
                 "num_ctx": config.OLLAMA_NUM_CTX,
+                "num_predict": config.OLLAMA_NUM_PREDICT,
                 "seed": config.SEED,
             },
         }
-        # A schema constrains decoding; "json" only guarantees well-formedness.
-        body["format"] = RESPONSE_SCHEMA if use_schema else "json"
+        body["format"] = schema if use_schema else "json"
         return body
 
-    def generate(self, payload: dict) -> dict:
+    def generate(
+        self,
+        payload: dict,
+        *,
+        system_prompt: str,
+        schema: dict,
+        timeout_s: float | None = None,
+    ) -> dict:
+        timeout = self.timeout_s if timeout_s is None else timeout_s
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
             use_schema = self._use_schema
             try:
                 response = self._session.post(
                     f"{self.base_url}/api/chat",
-                    json=self._body(payload, use_schema),
-                    timeout=self.timeout_s,
+                    json=self._body(payload, use_schema, system_prompt, schema),
+                    timeout=timeout,
                 )
                 if use_schema and response.status_code == 400:
-                    # Older Ollama rejects a schema in `format`. Downgrade once,
-                    # for the life of the process, and retry immediately.
                     with self._lock:
                         if self._use_schema:
                             logger.warning(
@@ -456,8 +738,8 @@ class OllamaProvider(IntelligenceProvider):
                             self._use_schema = False
                     response = self._session.post(
                         f"{self.base_url}/api/chat",
-                        json=self._body(payload, False),
-                        timeout=self.timeout_s,
+                        json=self._body(payload, False, system_prompt, schema),
+                        timeout=timeout,
                     )
                 response.raise_for_status()
                 content = response.json().get("message", {}).get("content", "")
@@ -469,7 +751,9 @@ class OllamaProvider(IntelligenceProvider):
                         "Ollama attempt %d/%d failed (%s) — retrying.",
                         attempt + 1, self.retries + 1, exc,
                     )
-        raise RuntimeError(f"Ollama request failed after {self.retries + 1} attempt(s): {last_error}")
+        raise RuntimeError(
+            f"Ollama request failed after {self.retries + 1} attempt(s): {last_error}"
+        )
 
     def close(self) -> None:
         try:
@@ -484,11 +768,7 @@ PROVIDERS: dict[str, type[IntelligenceProvider]] = {
 
 
 def _parse_json_object(content: str) -> dict:
-    """Decode the model's reply, tolerating a stray code fence or prose.
-
-    Rule 10 forbids both, but a fallback beats discarding an otherwise good
-    assessment because the model wrapped it in ```json.
-    """
+    """Decode the model's reply, tolerating a stray code fence or prose."""
     text = content.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
@@ -502,6 +782,14 @@ def _parse_json_object(content: str) -> dict:
     if not isinstance(parsed, dict):
         raise ValueError(f"Model reply was not a JSON object: {content[:200]!r}")
     return parsed
+
+
+def _clamp_free_intent(value: str) -> str:
+    words = value.split()
+    max_words = max(1, config.INTELLIGENCE_INTENT_MAX_WORDS)
+    if len(words) > max_words:
+        return " ".join(words[:max_words])
+    return value.strip()
 
 
 # --------------------------------------------------------------------------- #
@@ -533,44 +821,81 @@ class IntelligenceAnalyzer:
     def health(self) -> bool:
         return self.provider.health()
 
-    def analyze_one(self, result: dict) -> IntelligenceResult:
+    def analyze_one(
+        self,
+        result: dict,
+        *,
+        pack: PolicyPack | None = None,
+        intent_mode: str = "enum",
+        timeout_s: float | None = None,
+    ) -> IntelligenceResult:
         """Never raises — every failure becomes an 'insufficient evidence' record."""
+        pack = pack or DEFAULT_POLICY_PACK
+        if intent_mode not in _INTENT_MODES:
+            intent_mode = "enum"
+
         signals = derive_signals(result)
-        short_circuit = triage(result, signals)
+        short_circuit = triage(result, signals, pack=pack, intent_mode=intent_mode)
         if short_circuit is not None:
             return short_circuit
 
+        system_prompt = _prompt_for(pack, intent_mode)
+        schema = _schema_for(pack, intent_mode)
         started = time.perf_counter()
         try:
-            raw = self.provider.generate(build_payload(result, signals))
+            raw = self.provider.generate(
+                build_payload(result, signals),
+                system_prompt=system_prompt,
+                schema=schema,
+                timeout_s=timeout_s,
+            )
         except Exception as exc:
             logger.error("Intelligence provider failed: %s", exc)
             record = _insufficient(
                 f"The intelligence provider could not be reached or returned an "
                 f"unusable response ({type(exc).__name__}). The deterministic "
                 f"sentiment result is unaffected and remains valid.",
-                signals, "error",
+                signals, "error", pack=pack, intent_mode=intent_mode,
             )
             record.latency_ms = round((time.perf_counter() - started) * 1000.0, 1)
             record.model = getattr(self.provider, "model", "")
+            record.schema_enforced = self.provider.schema_enforced()
             return record
 
-        record = self._validate(raw, signals)
+        record = self._validate(raw, signals, pack=pack, intent_mode=intent_mode)
         record.latency_ms = round((time.perf_counter() - started) * 1000.0, 1)
         record.model = getattr(self.provider, "model", "")
+        record.schema_enforced = self.provider.schema_enforced()
         return record
 
-    def analyze_batch(self, results: list[dict]) -> list[IntelligenceResult]:
+    def analyze_batch(
+        self,
+        results: list[dict],
+        *,
+        pack: PolicyPack | None = None,
+        intent_mode: str = "enum",
+        timeout_s: float | None = None,
+    ) -> list[IntelligenceResult]:
         """Order-preserving. Duplicate posts share one provider call."""
         if not results:
             return []
 
-        # Dedupe on the exact text the model would see.
+        pack = pack or DEFAULT_POLICY_PACK
+        if intent_mode not in _INTENT_MODES:
+            intent_mode = "enum"
+        pack_fp = fingerprint_pack(pack.categories, pack.unknown_label, intent_mode)
+
         first_index: dict[tuple, int] = {}
         todo: list[int] = []
         reuse: dict[int, int] = {}
         for i, result in enumerate(results):
-            key = (result.get("post_text"), result.get("english_text"), result.get("sentiment"))
+            key = (
+                result.get("post_text"),
+                result.get("english_text"),
+                result.get("sentiment"),
+                pack_fp,
+                intent_mode,
+            )
             if key in first_index:
                 reuse[i] = first_index[key]
                 continue
@@ -580,12 +905,18 @@ class IntelligenceAnalyzer:
         workers = max(1, min(config.OLLAMA_CONCURRENCY, len(todo)))
         started = time.perf_counter()
         computed: dict[int, IntelligenceResult] = {}
+
+        def _run(j: int) -> IntelligenceResult:
+            return self.analyze_one(
+                results[j], pack=pack, intent_mode=intent_mode, timeout_s=timeout_s,
+            )
+
         if workers == 1:
             for i in todo:
-                computed[i] = self.analyze_one(results[i])
+                computed[i] = _run(i)
         else:
             with ThreadPoolExecutor(max_workers=workers) as pool:
-                for i, record in zip(todo, pool.map(lambda j: self.analyze_one(results[j]), todo)):
+                for i, record in zip(todo, pool.map(_run, todo)):
                     computed[i] = record
 
         out: list[IntelligenceResult] = []
@@ -602,24 +933,29 @@ class IntelligenceAnalyzer:
         errors = sum(1 for r in out if r.source == "error")
         logger.info(
             "Intelligence: %d post(s) in %.0f ms — %d analyzed, %d deduplicated, "
-            "%d resolved without a model call, %d failed",
+            "%d resolved without a model call, %d failed (pack=%s mode=%s)",
             len(results), (time.perf_counter() - started) * 1000.0,
             len(todo), len(reuse),
             sum(1 for r in out if r.source == "triage"), errors,
+            pack.name, intent_mode,
         )
         return out
 
-    def _validate(self, raw: dict, signals: list[str]) -> IntelligenceResult:
-        """Clamp the model's reply onto the contract.
+    def _validate(
+        self,
+        raw: dict,
+        signals: list[str],
+        *,
+        pack: PolicyPack,
+        intent_mode: str,
+    ) -> IntelligenceResult:
+        """Clamp the model's reply onto the contract."""
+        allowed_categories = pack.allowed_categories()
 
-        An out-of-taxonomy label becomes "Unknown" rather than being passed
-        through, so a downstream consumer can rely on the enum.
-        """
         def pick(key: str, allowed: frozenset[str], default: str) -> str:
             value = str(raw.get(key, "") or "").strip()
             if value in allowed:
                 return value
-            # Tolerate case drift ("monitor" -> "Monitor") before giving up.
             for candidate in allowed:
                 if candidate.lower() == value.lower():
                     return candidate
@@ -627,10 +963,18 @@ class IntelligenceAnalyzer:
                 logger.warning("Model returned %s=%r, outside the taxonomy.", key, value)
             return default
 
-        category = pick("category", _ALLOWED_CATEGORIES, config.UNKNOWN_LABEL)
-        intent = pick("intent", _ALLOWED_INTENTS, config.UNKNOWN_LABEL)
+        category = pick("category", allowed_categories, pack.unknown_label)
         action = pick("recommended_action", _ALLOWED_ACTIONS, "Human Review")
         evidence = pick("evidence_confidence", _ALLOWED_EVIDENCE, "low")
+
+        if intent_mode == "free":
+            intent = _clamp_free_intent(str(raw.get("intent", "") or "").strip())
+            if not intent:
+                intent = pack.unknown_label
+            intent_label = pick("intent_label", _ALLOWED_INTENTS, config.UNKNOWN_LABEL)
+        else:
+            intent = pick("intent", _ALLOWED_INTENTS, config.UNKNOWN_LABEL)
+            intent_label = intent
 
         try:
             risk = int(round(float(raw.get("risk_score", 0))))
@@ -650,6 +994,7 @@ class IntelligenceAnalyzer:
         return IntelligenceResult(
             category=category,
             intent=intent,
+            intent_label=intent_label,
             risk_score=risk,
             reasoning=reasoning,
             summary=summary,
@@ -657,6 +1002,9 @@ class IntelligenceAnalyzer:
             evidence_confidence=evidence,
             signals=signals,
             source="provider",
+            policy_pack_fingerprint=fingerprint_pack(
+                pack.categories, pack.unknown_label, intent_mode
+            ),
         )
 
     def close(self) -> None:

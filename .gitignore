@@ -14,6 +14,11 @@ outputs/*
 .cache/
 .ipynb_checkpoints/
 
+# Local secrets / runtime config (HF_TOKEN, OLLAMA_*)
+.env
+.env.*
+!.env.example
+
 # OS / editor
 .DS_Store
 Thumbs.db
