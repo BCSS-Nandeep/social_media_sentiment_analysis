@@ -227,6 +227,12 @@ PIPELINE_FALLBACK_TIMEOUT_S: float = float(
 PIPELINE_FALLBACK_MAX_WORKERS: int = max(
     1, int(os.getenv("SENTIMENT_PIPELINE_FALLBACK_MAX_WORKERS", "2"))
 )
+PIPELINE_FALLBACK_QUEUE_CAPACITY: int = max(
+    1, int(os.getenv("SENTIMENT_PIPELINE_FALLBACK_QUEUE_CAPACITY", "64"))
+)
+PIPELINE_FALLBACK_QUEUE_TIMEOUT_S: float = max(
+    0.0, float(os.getenv("SENTIMENT_PIPELINE_FALLBACK_QUEUE_TIMEOUT_S", "2"))
+)
 
 # --------------------------------------------------------------------------- #
 # Stage 3 — intelligence layer (Ollama)

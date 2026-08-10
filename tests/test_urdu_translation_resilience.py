@@ -338,6 +338,147 @@ class OllamaFallbackTests(unittest.TestCase):
             fallback.resolve(self._failure())
 
 
+class FallbackQueueTests(unittest.TestCase):
+    def _module(self):
+        spec = importlib.util.find_spec("src.fallback_queue")
+        self.assertIsNotNone(spec)
+        return importlib.import_module("src.fallback_queue")
+
+    def test_queue_is_fifo_and_rejects_work_at_capacity(self):
+        module = self._module()
+        work_queue = module.BoundedWorkQueue(
+            workers=1,
+            capacity=1,
+            thread_name_prefix="fallback-test",
+        )
+        started = threading.Event()
+        release = threading.Event()
+        order = []
+
+        def first():
+            started.set()
+            release.wait(1)
+            order.append("first")
+            return "first"
+
+        try:
+            first_future = work_queue.submit(first, timeout_s=0)
+            self.assertTrue(started.wait(0.5))
+            second_future = work_queue.submit(
+                lambda: order.append("second") or "second",
+                timeout_s=0,
+            )
+
+            with self.assertRaises(module.FallbackQueueFull):
+                work_queue.submit(lambda: "third", timeout_s=0)
+
+            stats = work_queue.stats()
+            self.assertEqual(1, stats["active"])
+            self.assertEqual(1, stats["queued"])
+            self.assertEqual(1, stats["rejected"])
+
+            release.set()
+            self.assertEqual("first", first_future.result(timeout=1))
+            self.assertEqual("second", second_future.result(timeout=1))
+            self.assertEqual(["first", "second"], order)
+        finally:
+            release.set()
+            work_queue.shutdown()
+
+    def test_batch_admission_is_all_or_none(self):
+        module = self._module()
+        work_queue = module.BoundedWorkQueue(
+            workers=1,
+            capacity=1,
+            thread_name_prefix="fallback-test",
+        )
+        try:
+            with self.assertRaises(module.FallbackQueueFull):
+                work_queue.submit_many(
+                    [
+                        (lambda: "first", (), {}),
+                        (lambda: "second", (), {}),
+                    ],
+                    timeout_s=0,
+                )
+            self.assertEqual(0, work_queue.stats()["accepted"])
+            self.assertEqual(2, work_queue.stats()["rejected"])
+        finally:
+            work_queue.shutdown()
+
+    def test_cancelling_pending_work_releases_capacity_immediately(self):
+        module = self._module()
+        work_queue = module.BoundedWorkQueue(
+            workers=1,
+            capacity=1,
+            thread_name_prefix="fallback-test",
+        )
+        started = threading.Event()
+        release = threading.Event()
+        try:
+            active = work_queue.submit(
+                lambda: started.set() or release.wait(1),
+                timeout_s=0,
+            )
+            self.assertTrue(started.wait(0.5))
+            pending = work_queue.submit(lambda: "pending", timeout_s=0)
+            self.assertTrue(pending.cancel())
+
+            replacement = work_queue.submit(
+                lambda: "replacement", timeout_s=0
+            )
+            self.assertEqual(1, work_queue.stats()["cancelled"])
+            release.set()
+            active.result(timeout=1)
+            self.assertEqual("replacement", replacement.result(timeout=1))
+        finally:
+            release.set()
+            work_queue.shutdown()
+
+    def test_shutdown_rejects_a_submit_waiting_for_capacity(self):
+        module = self._module()
+        work_queue = module.BoundedWorkQueue(
+            workers=1,
+            capacity=1,
+            thread_name_prefix="fallback-test",
+        )
+        started = threading.Event()
+        release = threading.Event()
+        submit_error = []
+        shutdown_thread = None
+        submit_thread = None
+        try:
+            work_queue.submit(
+                lambda: started.set() or release.wait(1),
+                timeout_s=0,
+            )
+            self.assertTrue(started.wait(0.5))
+            work_queue.submit(lambda: "pending", timeout_s=0)
+
+            def wait_to_submit():
+                try:
+                    work_queue.submit(lambda: "late", timeout_s=1)
+                except Exception as exc:
+                    submit_error.append(exc)
+
+            submit_thread = threading.Thread(target=wait_to_submit)
+            submit_thread.start()
+            time.sleep(0.02)
+            shutdown_thread = threading.Thread(target=work_queue.shutdown)
+            shutdown_thread.start()
+            submit_thread.join(timeout=0.5)
+
+            self.assertFalse(submit_thread.is_alive())
+            self.assertIsInstance(submit_error[0], RuntimeError)
+        finally:
+            release.set()
+            if submit_thread is not None:
+                submit_thread.join(timeout=1)
+            if shutdown_thread is not None:
+                shutdown_thread.join(timeout=1)
+            work_queue.shutdown()
+
+
 class TranslationFallbackTests(unittest.TestCase):
     def test_translation_quality_rejects_invalid_outputs(self):
         self.assertTrue(hasattr(translation, "translation_is_usable"))
@@ -513,23 +654,37 @@ class HealthStatusTests(unittest.TestCase):
         original_pipeline = api_server._pipeline
         original_analyzer = api_server._analyzer
         original_fallback = api_server._pipeline_fallback
+        original_queue = api_server._pipeline_fallback_queue
         api_server._pipeline = types.SimpleNamespace(
             device=types.SimpleNamespace(type="cuda"),
             stage_status=lambda: {},
         )
         api_server._analyzer = None
         api_server._pipeline_fallback = FakeFallback()
+        api_server._pipeline_fallback_queue = types.SimpleNamespace(
+            stats=lambda: {
+                "workers": 2,
+                "capacity": 64,
+                "queued": 0,
+                "active": 0,
+                "accepted": 3,
+                "rejected": 0,
+                "completed": 3,
+            }
+        )
         try:
             payload = api_server.health()
         finally:
             api_server._pipeline = original_pipeline
             api_server._analyzer = original_analyzer
             api_server._pipeline_fallback = original_fallback
+            api_server._pipeline_fallback_queue = original_queue
 
         self.assertTrue(payload["pipeline_fallback"]["available"])
         self.assertTrue(payload["pipeline_fallback"]["reachable"])
         self.assertEqual("ollama", payload["pipeline_fallback"]["provider"])
         self.assertEqual(2, payload["pipeline_fallback"]["max_workers"])
+        self.assertEqual(64, payload["pipeline_fallback"]["queue"]["capacity"])
 
 
 class ApiFailureContractTests(unittest.TestCase):
@@ -616,6 +771,40 @@ class ApiFallbackOrchestrationTests(unittest.TestCase):
         self.assertEqual([("bad", False)], fake_fallback.calls)
         self.assertEqual(["first", "bad", "last"], [r.post_text for r in results])
         self.assertEqual(4.0, results[1].translation_time_ms)
+
+    def test_full_fallback_queue_returns_pipeline_fallback_error(self):
+        import api_server
+
+        queue_module = importlib.import_module("src.fallback_queue")
+        failure = pipeline.PipelineFailure(
+            post_text="bad",
+            language="ur",
+            was_transliterated=True,
+            deterministic_time_ms=3.0,
+            reason="TranslationOutputError",
+            translation_time_ms=1.0,
+        )
+
+        class FullQueue:
+            def submit_many(self, *_args, **_kwargs):
+                raise queue_module.FallbackQueueFull("queue full")
+
+            def stats(self):
+                return {"queued": 1, "capacity": 1, "rejected": 1}
+
+        original_fallback = api_server._pipeline_fallback
+        self.assertTrue(hasattr(api_server, "_pipeline_fallback_queue"))
+        original_queue = api_server._pipeline_fallback_queue
+        api_server._pipeline_fallback = types.SimpleNamespace(
+            resolve=lambda _failure: None
+        )
+        api_server._pipeline_fallback_queue = FullQueue()
+        try:
+            with self.assertRaises(api_server.PipelineFallbackError):
+                api_server._resolve_pipeline_outcomes([failure], request_id=100)
+        finally:
+            api_server._pipeline_fallback = original_fallback
+            api_server._pipeline_fallback_queue = original_queue
 
 
 if __name__ == "__main__":

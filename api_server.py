@@ -47,7 +47,7 @@ import logging
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -59,6 +59,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 import config  # loads .env (HF_TOKEN) via load_dotenv()
+from src.fallback_queue import BoundedWorkQueue, FallbackQueueFull
 from src.pipeline_fallback import PipelineFallbackError
 from src.translation import TranslationError
 
@@ -73,7 +74,7 @@ logger = logging.getLogger("sentiment_api")
 
 _pipeline = None  # loaded once at startup, reused across requests
 _pipeline_fallback = None  # recoverable translation/sentiment failures only
-_pipeline_fallback_executor = None  # service-wide concurrency bound
+_pipeline_fallback_queue = None  # bounded service-wide FIFO
 _analyzer = None  # stage-3 intelligence layer; None when it failed to construct
 
 # Serializes model inference across the threadpool. Requests queue here; the
@@ -141,7 +142,7 @@ async def lifespan(_app: FastAPI):
         config.API_MAX_TEXTS, config.API_MAX_TEXT_CHARS, config.API_MAX_TOTAL_CHARS,
     )
 
-    global _pipeline_fallback, _pipeline_fallback_executor
+    global _pipeline_fallback, _pipeline_fallback_queue
     if config.PIPELINE_FALLBACK_ENABLED:
         try:
             from src.pipeline_fallback import OllamaPipelineFallback
@@ -149,8 +150,9 @@ async def lifespan(_app: FastAPI):
             _pipeline_fallback = OllamaPipelineFallback(
                 english_validator=_fallback_output_is_english
             )
-            _pipeline_fallback_executor = ThreadPoolExecutor(
-                max_workers=config.PIPELINE_FALLBACK_MAX_WORKERS,
+            _pipeline_fallback_queue = BoundedWorkQueue(
+                workers=config.PIPELINE_FALLBACK_MAX_WORKERS,
+                capacity=config.PIPELINE_FALLBACK_QUEUE_CAPACITY,
                 thread_name_prefix="pipeline-fallback",
             )
             logger.info(
@@ -159,7 +161,7 @@ async def lifespan(_app: FastAPI):
             )
         except Exception as exc:
             _pipeline_fallback = None
-            _pipeline_fallback_executor = None
+            _pipeline_fallback_queue = None
             logger.error("Pipeline fallback unavailable: %s", exc)
 
     # Stage 3 is optional and must never be able to take down /analyze, so it is
@@ -186,11 +188,9 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
-        if _pipeline_fallback_executor is not None:
-            _pipeline_fallback_executor.shutdown(
-                wait=True, cancel_futures=True
-            )
-            _pipeline_fallback_executor = None
+        if _pipeline_fallback_queue is not None:
+            _pipeline_fallback_queue.shutdown()
+            _pipeline_fallback_queue = None
         if _pipeline_fallback is not None:
             _pipeline_fallback.close()
             _pipeline_fallback = None
@@ -315,6 +315,11 @@ def health():
                 "available": True,
                 **_pipeline_fallback.describe(),
                 "reachable": _pipeline_fallback.health(),
+                "queue": (
+                    _pipeline_fallback_queue.stats()
+                    if _pipeline_fallback_queue is not None
+                    else None
+                ),
             }
             if _pipeline_fallback is not None
             else {
@@ -406,18 +411,38 @@ def _resolve_pipeline_outcomes(outcomes: list, request_id: int) -> list:
         len(failures),
         len(unique),
     )
-    if _pipeline_fallback_executor is None:
+    if _pipeline_fallback_queue is None:
         resolved = {
             key: _pipeline_fallback.resolve(failure)
             for key, failure in unique.items()
         }
     else:
-        futures = {
-            _pipeline_fallback_executor.submit(
-                _pipeline_fallback.resolve, failure
-            ): key
-            for key, failure in unique.items()
-        }
+        futures = {}
+        try:
+            keys = list(unique)
+            submitted = _pipeline_fallback_queue.submit_many(
+                [
+                    (
+                        _pipeline_fallback.resolve,
+                        (unique[key],),
+                        {},
+                    )
+                    for key in keys
+                ],
+                timeout_s=config.PIPELINE_FALLBACK_QUEUE_TIMEOUT_S,
+            )
+            futures = dict(zip(submitted, keys))
+        except FallbackQueueFull as exc:
+            for future in futures:
+                future.cancel()
+            logger.error(
+                "req %d: Ollama fallback queue saturated (%s)",
+                request_id,
+                _pipeline_fallback_queue.stats(),
+            )
+            raise PipelineFallbackError(
+                "Ollama fallback queue is at capacity"
+            ) from exc
         resolved = {}
         try:
             for future in as_completed(futures):

@@ -251,7 +251,9 @@ Defaults are far above ordinary traffic and are env-overridable:
 | `SENTIMENT_TRANSLATION_REPEAT_TOKEN_RATIO` | 0.5 | Rejects repetitive decode loops when one token dominates an output of at least eight tokens. |
 | `SENTIMENT_PIPELINE_FALLBACK_ENABLED` | true | Sends only recoverable deterministic translation/sentiment failures to Ollama after releasing the GPU inference lock. |
 | `SENTIMENT_PIPELINE_FALLBACK_TIMEOUT_S` | 60 | Timeout for the schema-constrained Ollama fallback call. Provider failure returns HTTP 503 for retry. |
-| `SENTIMENT_PIPELINE_FALLBACK_MAX_WORKERS` | 2 | Maximum concurrent Ollama fallback calls for distinct failed posts in one request. |
+| `SENTIMENT_PIPELINE_FALLBACK_MAX_WORKERS` | 2 | Service-wide Ollama fallback workers consuming the FIFO queue. |
+| `SENTIMENT_PIPELINE_FALLBACK_QUEUE_CAPACITY` | 64 | Maximum pending fallback jobs across all requests. |
+| `SENTIMENT_PIPELINE_FALLBACK_QUEUE_TIMEOUT_S` | 2 | Maximum wait to enqueue fallback work before returning HTTP 503. |
 | `SENTIMENT_TORCH_NUM_THREADS` | 0 (torch default) | CPU intra-op threads. Worth setting explicitly in a CPU deployment: torch sizes its default from the *visible* core count, so inside a cgroup-limited container it oversubscribes and contends. The effective value is logged at startup either way. |
 
 Inference is serialized on a lock — the pipeline is one set of torch modules
@@ -268,6 +270,12 @@ The deterministic stack remains authoritative. If IndicTrans2 and NLLB cannot
 produce usable English, or the sentiment classifier fails, the service isolates
 the failed post and calls Ollama only after releasing the GPU inference lock.
 Successful neighbors in the same batch are not sent to Ollama.
+
+Fallback work enters one bounded, process-wide FIFO queue. A fixed worker pool
+limits Ollama concurrency across all requests; the queue never grows without
+bound. Saturated submissions wait for the configured enqueue timeout and then
+return HTTP 503. `/health.pipeline_fallback.queue` reports active, queued,
+accepted, rejected, cancelled, and completed counts.
 
 Ollama is constrained to return exactly `english_text`, `sentiment`, and
 `confidence`. The service rejects additional/missing fields, sentiment outside
