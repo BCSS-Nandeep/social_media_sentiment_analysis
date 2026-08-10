@@ -100,6 +100,12 @@ TARGET_FLORES: str = "eng_Latn"
 TRANSLATION_BATCH_SIZE: int = int(os.getenv("SENTIMENT_TRANSLATION_BATCH_SIZE", "8"))
 TRANSLATION_MAX_LENGTH: int = 256
 TRANSLATION_NUM_BEAMS: int = 1  # raise to 4-5 for higher quality (slower on CPU)
+# Hugging Face's `max_time` is a cooperative generation bound: generation
+# checks it between decoding passes. The process watchdog below remains the hard
+# bound for a CUDA/kernel call that never returns to Python.
+GENERATION_MAX_TIME_S: float = float(
+    os.getenv("SENTIMENT_GENERATION_MAX_TIME_S", "30")
+)
 
 # Runaway-generation guard. A translation is never much longer than its source,
 # but a degenerate decode (e.g. IndicTrans2 running without IndicTransToolkit's
@@ -111,6 +117,15 @@ TRANSLATION_NUM_BEAMS: int = 1  # raise to 4-5 for higher quality (slower on CPU
 # fall back to a flat TRANSLATION_MAX_LENGTH budget.
 TRANSLATION_LENGTH_RATIO: float = float(os.getenv("SENTIMENT_TRANSLATION_LENGTH_RATIO", "2.5"))
 TRANSLATION_LENGTH_MARGIN: int = int(os.getenv("SENTIMENT_TRANSLATION_LENGTH_MARGIN", "32"))
+# Translation output sanity limits. IndicTrans2 output that remains primarily
+# in the source script, expands implausibly, or loops one token is delegated to
+# the NLLB fallback instead of being accepted as English.
+TRANSLATION_OUTPUT_MAX_RATIO: float = float(
+    os.getenv("SENTIMENT_TRANSLATION_OUTPUT_MAX_RATIO", "4.0")
+)
+TRANSLATION_REPEAT_TOKEN_RATIO: float = float(
+    os.getenv("SENTIMENT_TRANSLATION_REPEAT_TOKEN_RATIO", "0.5")
+)
 
 # Translation memoization, keyed on (source language, exact source text).
 # Translation dominates end-to-end latency, so a caller that retries a post
@@ -193,6 +208,12 @@ API_MAX_TOTAL_CHARS: int = int(os.getenv("SENTIMENT_API_MAX_TOTAL_CHARS", "20000
 # blocking every other request — including /health — forever. Comfortably
 # above the slowest observed legitimate single-post translation (~5 min).
 INFERENCE_LOCK_TIMEOUT_S: float = float(os.getenv("SENTIMENT_INFERENCE_LOCK_TIMEOUT_S", "600"))
+# Once a request owns the inference lock, an uninterruptible model call cannot
+# be cancelled safely from another Python thread. Exiting lets PM2 restart the
+# process and guarantees the lock is released.
+INFERENCE_HARD_TIMEOUT_S: float = float(
+    os.getenv("SENTIMENT_INFERENCE_HARD_TIMEOUT_S", "120")
+)
 
 # --------------------------------------------------------------------------- #
 # Stage 3 — intelligence layer (Ollama)

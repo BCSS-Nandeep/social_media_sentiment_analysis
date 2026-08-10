@@ -155,6 +155,7 @@ benchmark section below).
 | `401 Unauthorized` | machine not logged in to HF | Step 4.2 (`huggingface-cli login`) |
 | `403 Forbidden` | model access not granted yet | Step 4.1 (click "Agree and access repository", wait a moment) |
 | `No module named 'transformers.onnx'` or `past_key_values` shape error | transformers was upgraded | `pip install transformers==4.40.2` |
+| `No module named 'urduhack'` | Both overlapping Indic NLP distributions are installed, or the original one replaced the TensorFlow-free fork | Recreate the virtual environment from `requirements.txt`; only `indic-nlp-library-itt==0.1.1` may provide `indicnlp` |
 | Very slow on CPU | large batches / beams | add `--translation-batch-size 4`; keep `TRANSLATION_NUM_BEAMS = 1` in config.py |
 
 ## Production usage (reference)
@@ -200,6 +201,18 @@ curl -X POST http://localhost:8003/analyze \
   -d '{"texts": ["ప్రభుత్వం ప్రకటించిన కొత్త పథకం చాలా బాగుంది"]}'
 ```
 
+Urdu deployment smoke tests must cover both scripts:
+
+```bash
+curl -X POST http://localhost:8003/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"texts":["جس کسی کی بھی تراویح کی نماز نہیں ہوئی ہے"]}'
+
+curl -X POST http://localhost:8003/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"texts":["Jis kissi ki bhi Taraweeh ki Namaz Nahi hui hai"]}'
+```
+
 `GET /health` reports `{"healthy": true, "device": "cuda"|"cpu"}` once the models finish loading, plus two additive keys: `stages` (which optional stages actually came up) and `limits` (the request ceilings below). `HF_TOKEN` (for the gated IndicTrans2 model) is read from `.env`; `SENTIMENT_DEVICE` / `SENTIMENT_BATCH_SIZE` / `SENTIMENT_TRANSLATION_BATCH_SIZE` / `SENTIMENT_MAX_LENGTH` optionally override `config.py`'s defaults the same way.
 
 ### Send posts in batches
@@ -232,12 +245,19 @@ Defaults are far above ordinary traffic and are env-overridable:
 | `SENTIMENT_TRANSLATION_CACHE_SIZE` | 2048 | Memoizes translations on `(language, exact source text)`. A post retried after a client-side timeout is served from cache instead of being translated again. 0 disables. |
 | `SENTIMENT_TRANSLATION_LENGTH_RATIO` | 2.5 | Caps generation at `ratio x longest_source_tokens + margin` new tokens instead of a flat 256, so a degenerate decode can't burn the full budget on a short post. Every clamp is logged with the source length. 0 restores the flat budget. |
 | `SENTIMENT_TRANSLATION_LENGTH_MARGIN` | 32 | Constant added to the above. |
+| `SENTIMENT_GENERATION_MAX_TIME_S` | 30 | Cooperative Hugging Face generation deadline in seconds. IndicTrans2 failures or unusable output are retried through NLLB. |
+| `SENTIMENT_INFERENCE_HARD_TIMEOUT_S` | 120 | Hard deadline for each model-generation call. The process exits with code 70 so PM2 can restart it if a model or CUDA call cannot return to Python. Set 0 only for non-production debugging. |
+| `SENTIMENT_TRANSLATION_OUTPUT_MAX_RATIO` | 4.0 | Rejects implausibly expanded primary translations and sends them to NLLB. |
+| `SENTIMENT_TRANSLATION_REPEAT_TOKEN_RATIO` | 0.5 | Rejects repetitive decode loops when one token dominates an output of at least eight tokens. |
 | `SENTIMENT_TORCH_NUM_THREADS` | 0 (torch default) | CPU intra-op threads. Worth setting explicitly in a CPU deployment: torch sizes its default from the *visible* core count, so inside a cgroup-limited container it oversubscribes and contends. The effective value is logged at startup either way. |
 
 Inference is serialized on a lock — the pipeline is one set of torch modules
 and cannot be driven from two threads at once. Requests queue, and any wait
 over a second is logged, so a slow response can be attributed to saturation
 rather than to the model. To serve more concurrency, run more replicas.
+The production process manager must have automatic restart enabled: the hard
+watchdog deliberately terminates a process that cannot release the inference
+lock.
 
 A caller integrates purely through this HTTP contract — one example is
 SOCKEYE's backend, which can route sentiment requests here via

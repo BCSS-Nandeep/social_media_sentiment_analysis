@@ -1,4 +1,4 @@
-"""Finalized production pipeline: IndicLID -> IndicXlit -> IndicTrans2 -> Cardiff Twitter RoBERTa.
+"""Production pipeline: IndicLID -> IndicXlit -> IndicTrans2/NLLB -> Cardiff.
 
     post -> preprocessing -> language detection (lingua/langdetect)
          -> Latin-script? refine language with IndicLID-FTR (romanized-Indic
@@ -10,7 +10,8 @@
          -> Cardiff Twitter RoBERTa
          -> Positive / Neutral / Negative + confidence + timings
 
-No other translation or sentiment models are loaded here.
+NLLB is loaded as a deterministic fallback for failed or unusable primary
+translations; it does not replace IndicTrans2 as the authoritative path.
 """
 from __future__ import annotations
 
@@ -28,12 +29,18 @@ from src.lid_roman import RomanLanguageDetector
 from src.preprocessing import clean_text
 from src.script_detection import is_latin_script
 from src.transliteration import Transliterator
-from src.translation import Translator
+from src.translation import (
+    TranslationOutputError,
+    TranslationResult,
+    Translator,
+    translation_is_usable,
+)
 from src.utils import configure_torch_threads, resolve_device, set_seed
 
 logger = logging.getLogger("benchmark.pipeline")
 
 TRANSLATION_KEY = "indictrans2"
+FALLBACK_TRANSLATION_KEY = "nllb"
 SENTIMENT_KEY = "cardiff"
 
 
@@ -90,6 +97,9 @@ class SentimentPipeline:
         self.translator = Translator(
             config.TRANSLATION_MODELS[TRANSLATION_KEY], self.device
         )
+        self.fallback_translator = Translator(
+            config.TRANSLATION_MODELS[FALLBACK_TRANSLATION_KEY], self.device
+        )
         self.classifier = SentimentClassifier(
             config.SENTIMENT_MODELS[SENTIMENT_KEY], self.device, max_length=max_length
         )
@@ -118,6 +128,10 @@ class SentimentPipeline:
             "transliteration_languages": sorted(self.transliterator.models),
             "translator": self.translator.cfg.display_name,
             "translator_preprocessing": self.translator.preprocessing_mode,
+            "urdu_preprocessing_ready": self.translator.urdu_preprocessing_ready,
+            "fallback_translator": self.fallback_translator.cfg.display_name,
+            "generation_max_time_s": config.GENERATION_MAX_TIME_S,
+            "inference_hard_timeout_s": config.INFERENCE_HARD_TIMEOUT_S,
             "sentiment_model": self.classifier.cfg.display_name,
         }
 
@@ -156,6 +170,100 @@ class SentimentPipeline:
                 working_texts[i] = result
                 was_transliterated[i] = True
         return working_texts, was_transliterated
+
+    def _translate_with_fallback(
+        self, texts: list[str], languages: list[str], batch_size: int
+    ) -> TranslationResult:
+        """Use NLLB only when IndicTrans2 fails or emits unusable English."""
+        try:
+            primary = self.translator.translate(
+                texts, languages, batch_size=batch_size
+            )
+        except Exception as exc:
+            logger.error(
+                "Primary translator failed (%s); retrying batch with %s",
+                exc,
+                self.fallback_translator.cfg.display_name
+                if hasattr(self.fallback_translator, "cfg")
+                else "fallback translator",
+            )
+            try:
+                fallback = self.fallback_translator.translate(
+                    texts, languages, batch_size=batch_size
+                )
+            except Exception as fallback_exc:
+                raise TranslationOutputError(
+                    "Primary and fallback translators both failed"
+                ) from fallback_exc
+            self._validate_fallback(texts, languages, fallback)
+            return fallback
+
+        retry_indices = [
+            i
+            for i, (source, lang) in enumerate(zip(texts, languages))
+            if lang != "en"
+            and lang in config.FLORES_CODES
+            and (
+                not bool(primary.translated_mask[i])
+                or not translation_is_usable(source, primary.texts[i])
+            )
+        ]
+        if not retry_indices:
+            return primary
+
+        logger.warning(
+            "Primary translation rejected for %d post(s); retrying with %s",
+            len(retry_indices),
+            self.fallback_translator.cfg.display_name
+            if hasattr(self.fallback_translator, "cfg")
+            else "fallback translator",
+        )
+        retry_texts = [texts[i] for i in retry_indices]
+        retry_languages = [languages[i] for i in retry_indices]
+        try:
+            fallback = self.fallback_translator.translate(
+                retry_texts, retry_languages, batch_size=batch_size
+            )
+        except Exception as fallback_exc:
+            raise TranslationOutputError(
+                "Fallback translator failed for rejected primary output"
+            ) from fallback_exc
+        self._validate_fallback(retry_texts, retry_languages, fallback)
+
+        merged_texts = list(primary.texts)
+        merged_times = primary.times_ms.copy()
+        merged_mask = primary.translated_mask.copy()
+        for fallback_idx, original_idx in enumerate(retry_indices):
+            merged_texts[original_idx] = fallback.texts[fallback_idx]
+            merged_times[original_idx] += fallback.times_ms[fallback_idx]
+            merged_mask[original_idx] = fallback.translated_mask[fallback_idx]
+        return TranslationResult(
+            texts=merged_texts,
+            times_ms=merged_times,
+            total_time_s=primary.total_time_s + fallback.total_time_s,
+            gpu_peak_mb=max(primary.gpu_peak_mb, fallback.gpu_peak_mb),
+            translated_mask=merged_mask,
+            n_cached=primary.n_cached + fallback.n_cached,
+        )
+
+    @staticmethod
+    def _validate_fallback(
+        texts: list[str], languages: list[str], result: TranslationResult
+    ) -> None:
+        bad = [
+            i
+            for i, (source, lang) in enumerate(zip(texts, languages))
+            if lang != "en"
+            and lang in config.FLORES_CODES
+            and (
+                not bool(result.translated_mask[i])
+                or not translation_is_usable(source, result.texts[i])
+            )
+        ]
+        if bad:
+            raise TranslationOutputError(
+                f"Fallback translator returned unusable output for {len(bad)} post(s)"
+            )
 
     def predict_batch(
         self,
@@ -206,8 +314,8 @@ class SentimentPipeline:
         t_xlit = time.perf_counter()
 
         logger.info("%s: stage=translate", tag)
-        translation = self.translator.translate(
-            working_texts, languages, batch_size=translation_batch_size
+        translation = self._translate_with_fallback(
+            working_texts, languages, translation_batch_size
         )
         t_translate = time.perf_counter()
         logger.info("%s: stage=sentiment", tag)
@@ -265,5 +373,6 @@ class SentimentPipeline:
             self.roman_detector.free()
             self.transliterator.free()
             self.translator.free()
+            self.fallback_translator.free()
             self.classifier.free()
             logger.info("Pipeline models released.")

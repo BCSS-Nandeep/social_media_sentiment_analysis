@@ -26,6 +26,7 @@ from pathlib import Path
 import torch
 
 import config
+from src.inference_watchdog import guarded_model_call
 
 logger = logging.getLogger("benchmark.transliteration")
 
@@ -161,7 +162,10 @@ class Transliterator:
             if not xlit_indices:
                 return text
             spaced_batch = [_char_space(words[i]) for i in xlit_indices]
-            results = model.translate(spaced_batch, beam=5)
+            results = guarded_model_call(
+                lambda: model.translate(spaced_batch, beam=5),
+                config.INFERENCE_HARD_TIMEOUT_S,
+            )
             out_words = list(words)
             for i, result in zip(xlit_indices, results):
                 out_words[i] = result.replace(" ", "")

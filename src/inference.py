@@ -22,11 +22,13 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from config import (
     ID2LABEL,
+    INFERENCE_HARD_TIMEOUT_S,
     LABEL2ID,
     LABELS,
     NEUTRAL_UNCERTAINTY_SCALE,
     SentimentModelConfig,
 )
+from src.inference_watchdog import guarded_model_call
 from src.utils import chunked, get_gpu_peak_mb, get_model_size_mb, reset_gpu_peak
 
 logger = logging.getLogger("benchmark.inference")
@@ -154,17 +156,27 @@ class SentimentClassifier:
                     padding=True,
                     max_length=self.max_length,
                     return_tensors="pt",
-                ).to(self.device)
+                )
 
-                if self.device.type == "cuda":
-                    torch.cuda.synchronize(self.device)
-                t0 = time.perf_counter()
-                logits = self.model(**encoded).logits
-                if self.device.type == "cuda":
-                    torch.cuda.synchronize(self.device)
-                elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                def classify_batch():
+                    encoded_on_device = encoded.to(self.device)
+                    if self.device.type == "cuda":
+                        torch.cuda.synchronize(self.device)
+                    t0 = time.perf_counter()
+                    batch_logits = self.model(**encoded_on_device).logits
+                    if self.device.type == "cuda":
+                        torch.cuda.synchronize(self.device)
+                    elapsed = (time.perf_counter() - t0) * 1000.0
+                    probabilities = (
+                        torch.softmax(batch_logits, dim=-1).cpu().numpy()
+                    )
+                    return probabilities, elapsed
 
-                all_probs.append(torch.softmax(logits, dim=-1).cpu().numpy())
+                probabilities, elapsed_ms = guarded_model_call(
+                    classify_batch, INFERENCE_HARD_TIMEOUT_S
+                )
+
+                all_probs.append(probabilities)
                 times_ms.extend([elapsed_ms / len(batch)] * len(batch))
 
         total_time = time.perf_counter() - total_start

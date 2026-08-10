@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections import OrderedDict, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -33,14 +33,19 @@ from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 from config import (
     FLORES_CODES,
+    GENERATION_MAX_TIME_S,
+    INFERENCE_HARD_TIMEOUT_S,
     TARGET_FLORES,
     TRANSLATION_CACHE_SIZE,
     TRANSLATION_LENGTH_MARGIN,
     TRANSLATION_LENGTH_RATIO,
     TRANSLATION_MAX_LENGTH,
     TRANSLATION_NUM_BEAMS,
+    TRANSLATION_OUTPUT_MAX_RATIO,
+    TRANSLATION_REPEAT_TOKEN_RATIO,
     TranslationConfig,
 )
+from src.inference_watchdog import guarded_model_call
 from src.utils import chunked, get_gpu_peak_mb, get_model_size_mb, reset_gpu_peak
 
 logger = logging.getLogger("benchmark.translation")
@@ -48,6 +53,18 @@ logger = logging.getLogger("benchmark.translation")
 
 class TranslatorLoadError(RuntimeError):
     """A translation model could not be loaded; the message says how to fix it."""
+
+
+class TranslationError(RuntimeError):
+    """A translation request could not produce a safe English result."""
+
+
+class TranslationPreprocessError(TranslationError):
+    """Input could not be prepared safely for the selected translation model."""
+
+
+class TranslationOutputError(TranslationError):
+    """Neither translator produced a credible English result."""
 
 
 def _load_error_hint(cfg: TranslationConfig, exc: Exception) -> str:
@@ -91,6 +108,43 @@ class TranslationResult:
     n_cached: int = 0        # posts served from the translation cache (times_ms 0)
 
 
+def _arabic_script_ratio(text: str) -> float:
+    letters = [char for char in text if char.isalpha()]
+    if not letters:
+        return 0.0
+    arabic = sum("\u0600" <= char <= "\u06ff" for char in letters)
+    return arabic / len(letters)
+
+
+def translation_is_usable(source: str, translated: str) -> bool:
+    """Reject outputs that cannot be a credible English translation."""
+    source = str(source or "").strip()
+    translated = str(translated or "").strip()
+    if not translated:
+        return False
+    if source.casefold() == translated.casefold():
+        return False
+    letters = [char for char in translated if char.isalpha()]
+    if not letters:
+        return False
+    latin_letters = sum(
+        ("a" <= char.casefold() <= "z") for char in letters
+    )
+    if latin_letters / len(letters) < 0.6:
+        return False
+    if _arabic_script_ratio(source) >= 0.5 and _arabic_script_ratio(translated) >= 0.2:
+        return False
+    if len(translated) > max(256, int(len(source) * TRANSLATION_OUTPUT_MAX_RATIO)):
+        return False
+
+    tokens = translated.casefold().split()
+    if len(tokens) >= 8:
+        most_common = Counter(tokens).most_common(1)[0][1]
+        if most_common / len(tokens) >= TRANSLATION_REPEAT_TOKEN_RATIO:
+            return False
+    return True
+
+
 class Translator:
     """One translation pipeline wrapped for benchmarking.
 
@@ -123,17 +177,17 @@ class Translator:
 
         self._indic_processor = None
         self._indic_processor_broken_langs: set[str] = set()
+        self._urdu_preprocessing_ready = cfg.family != "indictrans2"
         if cfg.family == "indictrans2":
             try:
                 from IndicTransToolkit.processor import IndicProcessor
 
                 self._indic_processor = IndicProcessor(inference=True)
             except Exception as exc:
-                logger.warning(
-                    "IndicTransToolkit unavailable (%s) — falling back to plain "
-                    "tag prefixing for IndicTrans2 (slightly lower quality).",
-                    exc,
-                )
+                raise TranslatorLoadError(
+                    "IndicTransToolkit is required for safe IndicTrans2 preprocessing"
+                ) from exc
+            self._validate_urdu_preprocessor()
 
     @property
     def size_mb(self) -> float:
@@ -146,6 +200,33 @@ class Translator:
         if self.cfg.family != "indictrans2":
             return "native"
         return "IndicTransToolkit" if self._indic_processor is not None else "plain-tag-prefix"
+
+    @property
+    def urdu_preprocessing_ready(self) -> bool:
+        return self._urdu_preprocessing_ready
+
+    def _validate_urdu_preprocessor(self) -> None:
+        """Fail startup if the active ``indicnlp`` package cannot process Urdu.
+
+        Installing both ``indic-nlp-library`` and ``indic-nlp-library-itt`` is
+        unsafe because they own identical import paths. This probe catches that
+        environment error before the service reports healthy.
+        """
+        try:
+            prepared = self._indic_processor.preprocess_batch(
+                ["یہ ایک آزمائشی جملہ ہے۔"],
+                src_lang="urd_Arab",
+                tgt_lang=TARGET_FLORES,
+            )
+        except Exception as exc:
+            raise TranslatorLoadError(
+                "Urdu preprocessing is unavailable. Install only "
+                "indic-nlp-library-itt==0.1.1; remove indic-nlp-library and "
+                "standalone urduhack."
+            ) from exc
+        if not prepared or not str(prepared[0]).strip():
+            raise TranslatorLoadError("Urdu preprocessing returned an empty result")
+        self._urdu_preprocessing_ready = True
 
     # ------------------------------------------------------------------ #
     # Translation cache
@@ -179,13 +260,13 @@ class Translator:
                         batch, src_lang=src_flores, tgt_lang=TARGET_FLORES
                     )
                 except Exception as exc:
-                    # e.g. IndicTransToolkit's Urdu normalizer needs the
-                    # `urduhack` package, which isn't installed here (it
-                    # transitively pulls in TensorFlow, which segfaults
-                    # alongside the fairseq-based transliteration stage
-                    # already running in this process). Degrade to plain tag
-                    # prefixing for this language only — every other language
-                    # keeps the better IndicTransToolkit preprocessing.
+                    if src_flores == "urd_Arab":
+                        raise TranslationPreprocessError(
+                            "IndicTransToolkit failed to preprocess Urdu"
+                        ) from exc
+                    # Preserve the established lower-quality fallback for
+                    # languages whose optional normalizer fails. Urdu is
+                    # excluded because plain tags can cause degenerate decode.
                     self._indic_processor_broken_langs.add(src_flores)
                     logger.warning(
                         "IndicTransToolkit preprocessing failed for %s (%s) — "
@@ -236,6 +317,7 @@ class Translator:
             "max_new_tokens": max(1, budget),
             "num_beams": TRANSLATION_NUM_BEAMS,
             "do_sample": False,
+            "max_time": GENERATION_MAX_TIME_S,
         }
         if self.cfg.family == "nllb":
             kwargs["forced_bos_token_id"] = self.tokenizer.convert_tokens_to_ids(TARGET_FLORES)
@@ -319,18 +401,27 @@ class Translator:
                             padding=True,
                             max_length=TRANSLATION_MAX_LENGTH,
                             return_tensors="pt",
-                        ).to(self.device)
+                        )
 
                         source_tokens = int(encoded["attention_mask"].sum(dim=1).max())
                         generate_kwargs = self._generate_kwargs(source_tokens)
 
-                        if self.device.type == "cuda":
-                            torch.cuda.synchronize(self.device)
-                        t0 = time.perf_counter()
-                        generated = self.model.generate(**encoded, **generate_kwargs)
-                        if self.device.type == "cuda":
-                            torch.cuda.synchronize(self.device)
-                        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                        def generate_batch():
+                            encoded_on_device = encoded.to(self.device)
+                            if self.device.type == "cuda":
+                                torch.cuda.synchronize(self.device)
+                            t0 = time.perf_counter()
+                            generated_batch = self.model.generate(
+                                **encoded_on_device, **generate_kwargs
+                            )
+                            if self.device.type == "cuda":
+                                torch.cuda.synchronize(self.device)
+                            elapsed = (time.perf_counter() - t0) * 1000.0
+                            return generated_batch, elapsed
+
+                        generated, elapsed_ms = guarded_model_call(
+                            generate_batch, INFERENCE_HARD_TIMEOUT_S
+                        )
 
                         # A decode that used its entire budget almost certainly
                         # never emitted EOS — the signature of a runaway decode.

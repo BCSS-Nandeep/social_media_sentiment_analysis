@@ -17,11 +17,12 @@ sacrebleu>=2.4
 sentencepiece>=0.2
 accelerate>=0.28
 IndicTransToolkit>=1.0 ; python_version < "3.14"
-# IndicTransToolkit's own preprocessing imports indicnlp.tokenize at runtime
-# but doesn't declare this as an install dependency — without it, translation
-# silently degrades to lower-quality plain tag-prefixing (still works, just
-# worse output) instead of failing loudly. Pin it explicitly.
-indic-nlp-library>=0.92
+# TensorFlow-free Indic NLP fork maintained for IndicTransToolkit/IndicTrans2.
+# It embeds the Urdu normalizer that the original package imports from
+# `urduhack`. Do not install `indic-nlp-library` alongside it: both distributions
+# own the same `indicnlp` module paths, so install order can silently restore the
+# TensorFlow-based Urdu import and break `urd_Arab` preprocessing.
+indic-nlp-library-itt==0.1.1
 # Optional — enables COMET / CometKiwi translation quality scores (heavy install;
 # CometKiwi is additionally a gated HuggingFace model requiring `huggingface-cli login`):
 # unbabel-comet>=2.2

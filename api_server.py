@@ -57,6 +57,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 import config  # loads .env (HF_TOKEN) via load_dotenv()
+from src.translation import TranslationError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,7 +86,9 @@ async def lifespan(_app: FastAPI):
     global _pipeline
     from src.pipeline import SentimentPipeline
 
-    logger.info("Loading sentiment pipeline (IndicTrans2 + Cardiff RoBERTa)...")
+    logger.info(
+        "Loading sentiment pipeline (IndicTrans2 primary + NLLB fallback + Cardiff RoBERTa)..."
+    )
     started = time.perf_counter()
     _pipeline = SentimentPipeline(device=config.DEVICE)
     logger.info(
@@ -248,10 +251,9 @@ def _run_pipeline(texts: list[str], request_id: int) -> list:
     """Deterministic stage under the inference lock. Shared by both endpoints so
     they cannot drift apart — /analyze/intelligence runs the identical pipeline.
 
-    The lock is acquired with a timeout: a request that hangs inside the model
-    (GPU-level stall, pathological input) must fail on its own instead of
-    holding the lock forever and queuing every other request — including
-    /health — behind it indefinitely."""
+    Lock acquisition has a queue timeout. Individual model-generation calls
+    carry the process watchdog so large healthy batches are not given one
+    shared wall-clock deadline."""
     queued_at = time.perf_counter()
     if not _inference_lock.acquire(timeout=config.INFERENCE_LOCK_TIMEOUT_S):
         waited_s = time.perf_counter() - queued_at
@@ -308,7 +310,7 @@ def analyze(req: AnalyzeRequest):
     )
     try:
         results = _run_pipeline(req.texts, request_id)
-    except TimeoutError as e:
+    except (TimeoutError, TranslationError) as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     return {"results": [r.to_dict() for r in results]}
 
@@ -350,7 +352,7 @@ def analyze_intelligence(req: AnalyzeRequest):
 
     try:
         results = _run_pipeline(req.texts, request_id)
-    except TimeoutError as e:
+    except (TimeoutError, TranslationError) as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     payloads = [r.to_dict() for r in results]
 
