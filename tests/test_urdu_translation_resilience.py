@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from src import pipeline
+from src import lid_roman
 from src import translation
 
 
@@ -72,6 +73,21 @@ class UrduDependencyTests(unittest.TestCase):
         prepared = translator._prepare_batch(["नमस्ते"], "hin_Deva")
 
         self.assertEqual(["hin_Deva eng_Latn नमस्ते"], prepared)
+
+
+class RomanLanguageRoutingTests(unittest.TestCase):
+    def test_bert_can_override_confident_ftr_english_for_roman_urdu(self):
+        detector = lid_roman.RomanLanguageDetector.__new__(
+            lid_roman.RomanLanguageDetector
+        )
+        detector._ftr_predict = lambda _text: ("eng_Latn", 0.999)
+        detector._bert_predict = lambda _text: "urd_Latn"
+
+        language = detector.detect(
+            "Jis kissi ki bhi Taraweeh ki Namaz Nahi hui hai"
+        )
+
+        self.assertEqual("ur", language)
 
 
 class TranslationFallbackTests(unittest.TestCase):

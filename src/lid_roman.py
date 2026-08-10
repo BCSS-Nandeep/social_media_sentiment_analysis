@@ -41,6 +41,7 @@ import zipfile
 from pathlib import Path
 
 import config
+from src.inference_watchdog import guarded_model_call
 
 logger = logging.getLogger("benchmark.lid_roman")
 
@@ -152,11 +153,17 @@ class RomanLanguageDetector:
         if self.bert is None or self.tokenizer is None:
             return None
         encoded = self.tokenizer([text], return_tensors="pt", padding=True, truncation=True, max_length=512)
-        encoded = {k: v.to(self.device) for k, v in encoded.items()}
-        with torch.no_grad():
-            out = self.bert(**encoded)
-        idx = int(out.logits.argmax(dim=1)[0])
-        return LABELS_BY_INDEX[idx] if idx < len(LABELS_BY_INDEX) else None
+
+        def predict_label():
+            encoded_on_device = {k: v.to(self.device) for k, v in encoded.items()}
+            with torch.no_grad():
+                out = self.bert(**encoded_on_device)
+            idx = int(out.logits.argmax(dim=1)[0])
+            return LABELS_BY_INDEX[idx] if idx < len(LABELS_BY_INDEX) else None
+
+        return guarded_model_call(
+            predict_label, config.INFERENCE_HARD_TIMEOUT_S
+        )
 
     def detect(self, text: str) -> str | None:
         """Best-effort language for Latin-script `text`. None means "couldn't
@@ -165,14 +172,23 @@ class RomanLanguageDetector:
             return None
         try:
             ftr_result = self._ftr_predict(text)
+            confident_ftr_label = None
             if ftr_result is not None:
                 label, score = ftr_result
                 if score >= FTR_CONFIDENCE_THRESHOLD:
-                    return LABEL_TO_LANG.get(label)
-            # FTR wasn't confident (or unavailable) — try the BERT reranker.
+                    confident_ftr_label = label
+                    # IndicLID-FTR can be confidently wrong by calling
+                    # romanized Indic text English. Let BERT adjudicate that
+                    # boundary; retain the fast path for confident Indic labels.
+                    if label != "eng_Latn":
+                        mapped = LABEL_TO_LANG.get(label)
+                        if mapped is not None:
+                            return mapped
             bert_label = self._bert_predict(text)
             if bert_label is not None:
                 return LABEL_TO_LANG.get(bert_label)
+            if confident_ftr_label is not None:
+                return LABEL_TO_LANG.get(confident_ftr_label)
             return None
         except Exception as exc:
             logger.warning("Roman LID failed for text: %s", exc)
