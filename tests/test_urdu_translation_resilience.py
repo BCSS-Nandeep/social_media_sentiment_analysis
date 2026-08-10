@@ -12,6 +12,7 @@ import numpy as np
 
 from src import pipeline
 from src import lid_roman
+from src import transliteration
 from src import translation
 
 
@@ -76,6 +77,13 @@ class UrduDependencyTests(unittest.TestCase):
 
 
 class RomanLanguageRoutingTests(unittest.TestCase):
+    def test_indicxlit_input_includes_language_token_and_lowercase_chars(self):
+        self.assertTrue(hasattr(transliteration, "_prepare_word"))
+
+        prepared = transliteration._prepare_word("Namaz", "ur")
+
+        self.assertEqual("__ur__ n a m a z", prepared)
+
     def test_bert_can_override_confident_ftr_english_for_roman_urdu(self):
         detector = lid_roman.RomanLanguageDetector.__new__(
             lid_roman.RomanLanguageDetector

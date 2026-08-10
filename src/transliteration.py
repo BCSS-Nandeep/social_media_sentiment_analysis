@@ -98,6 +98,11 @@ def _char_space(word: str) -> str:
     return " ".join(list(word))
 
 
+def _prepare_word(word: str, lang: str) -> str:
+    """Match IndicXlit's official Roman-input preprocessing."""
+    return f"__{lang}__ {_char_space(word.lower())}"
+
+
 class Transliterator:
     """Roman -> native-script transliteration for one or more Indic languages.
 
@@ -161,7 +166,7 @@ class Transliterator:
             ]
             if not xlit_indices:
                 return text
-            spaced_batch = [_char_space(words[i]) for i in xlit_indices]
+            spaced_batch = [_prepare_word(words[i], lang) for i in xlit_indices]
             results = guarded_model_call(
                 lambda: model.translate(spaced_batch, beam=5),
                 config.INFERENCE_HARD_TIMEOUT_S,
