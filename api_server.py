@@ -85,6 +85,38 @@ _inference_lock = threading.Lock()
 _request_ids = itertools.count(1)
 
 
+def _fallback_output_is_english(text: str) -> bool:
+    """Validate Ollama output with the loaded general and Roman-Indic LID."""
+    if _pipeline is None:
+        return False
+    if not _inference_lock.acquire(
+        timeout=min(30.0, config.INFERENCE_LOCK_TIMEOUT_S)
+    ):
+        logger.warning("Could not acquire inference lock for fallback validation")
+        return False
+    try:
+        if _pipeline.detector.detect(text) != "en":
+            return False
+        from src.script_detection import is_latin_script
+
+        if is_latin_script(text):
+            refined = _pipeline.roman_detector.detect(text)
+            if refined not in (None, "en"):
+                logger.warning(
+                    "Rejected Ollama fallback output classified as Roman %s",
+                    refined,
+                )
+                return False
+        return True
+    except Exception as exc:
+        logger.warning(
+            "Fallback English validation failed (%s)", type(exc).__name__
+        )
+        return False
+    finally:
+        _inference_lock.release()
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Startup/shutdown for the pipeline (replaces the deprecated on_event hooks)."""
@@ -114,7 +146,9 @@ async def lifespan(_app: FastAPI):
         try:
             from src.pipeline_fallback import OllamaPipelineFallback
 
-            _pipeline_fallback = OllamaPipelineFallback()
+            _pipeline_fallback = OllamaPipelineFallback(
+                english_validator=_fallback_output_is_english
+            )
             _pipeline_fallback_executor = ThreadPoolExecutor(
                 max_workers=config.PIPELINE_FALLBACK_MAX_WORKERS,
                 thread_name_prefix="pipeline-fallback",

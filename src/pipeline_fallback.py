@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import Callable
 
 import config
 from src.intelligence import OllamaProvider
@@ -27,10 +28,15 @@ FALLBACK_SCHEMA = {
     },
 }
 
-FALLBACK_SYSTEM_PROMPT = """You are a fallback component inside a fixed
-translation and sentiment pipeline. Translate the supplied social-media post
-faithfully into English, preserving names, dates, URLs, hashtags, religious
-terms, and quoted text. Then classify only its sentiment.
+FALLBACK_SYSTEM_PROMPT = """You are a strict fallback component inside a fixed
+translation and sentiment pipeline. The detected_language value is
+authoritative. For example, detected_language "ur" means Urdu even when the
+post uses Latin letters (Roman Urdu). Translate every source-language phrase
+into clear, idiomatic English. Never transliterate, romanize, or paraphrase in
+the source language. Preserve proper names, dates, URLs, hashtags, religious
+names normally retained in English, and quoted meaning. Examples: Roman Urdu
+"mujhe yeh pasand nahi" becomes "I do not like this"; "kal namaz hui" becomes
+"the prayer took place yesterday". Then classify only its sentiment.
 
 Return one JSON object with exactly these fields:
 - english_text: faithful English translation
@@ -50,12 +56,14 @@ class OllamaPipelineFallback:
         self,
         provider: OllamaProvider | None = None,
         timeout_s: float = config.PIPELINE_FALLBACK_TIMEOUT_S,
+        english_validator: Callable[[str], bool] | None = None,
     ) -> None:
         self.provider = provider or OllamaProvider(
             timeout_s=timeout_s,
             retries=0,
         )
         self.timeout_s = float(timeout_s)
+        self.english_validator = english_validator
 
     def describe(self) -> dict:
         provider = self.provider.describe()
@@ -118,8 +126,8 @@ class OllamaPipelineFallback:
             total_time_ms=translation_ms,
         )
 
-    @staticmethod
     def _validate(
+        self,
         response: object, failure: PipelineFailure
     ) -> tuple[str, str, float]:
         if not isinstance(response, dict):
@@ -148,4 +156,12 @@ class OllamaPipelineFallback:
             failure.post_text, english_text
         ):
             raise PipelineFallbackError("Ollama fallback translation is unusable")
+        if (
+            failure.language != "en"
+            and self.english_validator is not None
+            and not self.english_validator(english_text)
+        ):
+            raise PipelineFallbackError(
+                "Ollama fallback output was not verified as English"
+            )
         return english_text, sentiment, float(confidence)

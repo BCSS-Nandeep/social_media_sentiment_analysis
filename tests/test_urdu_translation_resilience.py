@@ -319,6 +319,24 @@ class OllamaFallbackTests(unittest.TestCase):
         with self.assertRaises(module.PipelineFallbackError):
             fallback.resolve(self._failure())
 
+    def test_pipeline_english_validator_rejects_roman_urdu_output(self):
+        module = self._module()
+        provider = self.FakeProvider(
+            {
+                "english_text": "Jis ki niyaz nahi thi",
+                "sentiment": "Neutral",
+                "confidence": 0.8,
+            }
+        )
+        fallback = module.OllamaPipelineFallback(
+            provider=provider,
+            timeout_s=5,
+            english_validator=lambda _text: False,
+        )
+
+        with self.assertRaises(module.PipelineFallbackError):
+            fallback.resolve(self._failure())
+
 
 class TranslationFallbackTests(unittest.TestCase):
     def test_translation_quality_rejects_invalid_outputs(self):
