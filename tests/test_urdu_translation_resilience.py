@@ -90,9 +90,9 @@ class RomanLanguageRoutingTests(unittest.TestCase):
         )
         service.models = {"ur": model}
 
-        result = service.transliterate("Teen meh 6th Sat hai,", "ur")
+        result = service.transliterate("Teen Din meh 6th Sat hai,", "ur")
 
-        self.assertEqual("تین میں 6th Sat ہے,", result)
+        self.assertEqual("تین دن میں 6th Sat ہے,", result)
         self.assertEqual(["__ur__ h a i"], model.prepared)
 
     def test_indicxlit_input_includes_language_token_and_lowercase_chars(self):

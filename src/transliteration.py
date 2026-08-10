@@ -55,6 +55,7 @@ SUPPORTED_LANGS = ("hi", "te", "ta", "kn", "ml", "mr", "bn", "gu", "pa", "ur")
 ROMAN_WORD_RE = re.compile(r"^([^A-Za-z]*)([A-Za-z]+)([^A-Za-z]*)$")
 URDU_NATIVE_OVERRIDES = {
     "teen": "تین",
+    "din": "دن",
     "meh": "میں",
 }
 URDU_PRESERVE_ROMAN = {
