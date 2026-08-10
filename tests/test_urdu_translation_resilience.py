@@ -77,6 +77,24 @@ class UrduDependencyTests(unittest.TestCase):
 
 
 class RomanLanguageRoutingTests(unittest.TestCase):
+    def test_urdu_transliteration_preserves_dates_and_normalizes_common_words(self):
+        class FakeModel:
+            def translate(self, prepared, beam):
+                self.prepared = prepared
+                self.beam = beam
+                return ["ہ ے"]
+
+        model = FakeModel()
+        service = transliteration.Transliterator.__new__(
+            transliteration.Transliterator
+        )
+        service.models = {"ur": model}
+
+        result = service.transliterate("Teen meh 6th Sat hai,", "ur")
+
+        self.assertEqual("تین میں 6th Sat ہے,", result)
+        self.assertEqual(["__ur__ h a i"], model.prepared)
+
     def test_indicxlit_input_includes_language_token_and_lowercase_chars(self):
         self.assertTrue(hasattr(transliteration, "_prepare_word"))
 

@@ -17,6 +17,7 @@ under MODELS_DIR.
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import tempfile
 import urllib.request
@@ -50,6 +51,17 @@ CHECKPOINT_LANG_LIST = (
 # call, at the cost of ~10x the memory/startup time for a model this small.
 # Revisit if startup time or memory becomes a real constraint.
 SUPPORTED_LANGS = ("hi", "te", "ta", "kn", "ml", "mr", "bn", "gu", "pa", "ur")
+
+ROMAN_WORD_RE = re.compile(r"^([^A-Za-z]*)([A-Za-z]+)([^A-Za-z]*)$")
+URDU_NATIVE_OVERRIDES = {
+    "teen": "تین",
+    "meh": "میں",
+}
+URDU_PRESERVE_ROMAN = {
+    "mon", "monday", "tue", "tues", "tuesday", "wed", "wednesday",
+    "thu", "thur", "thurs", "thursday", "fri", "friday", "sat", "saturday",
+    "sun", "sunday",
+}
 
 
 def _ensure_downloaded() -> None:
@@ -161,19 +173,39 @@ class Transliterator:
             # call per word — each with its own batch-sampler setup overhead.
             # A 40-word post took 60+ seconds. fairseq's translate() batches a
             # list in a single call, so send every real word through at once.
-            xlit_indices = [
-                i for i, w in enumerate(words) if w and any(c.isalpha() for c in w)
-            ]
+            out_words = list(words)
+            xlit_indices = []
+            xlit_parts = []
+            for i, word in enumerate(words):
+                match = ROMAN_WORD_RE.fullmatch(word)
+                if match is None:
+                    continue
+                prefix, core, suffix = match.groups()
+                if any(char.isalnum() for char in prefix + suffix):
+                    continue
+                normalized = core.lower()
+                if lang == "ur" and normalized in URDU_NATIVE_OVERRIDES:
+                    out_words[i] = (
+                        prefix + URDU_NATIVE_OVERRIDES[normalized] + suffix
+                    )
+                    continue
+                if lang == "ur" and normalized in URDU_PRESERVE_ROMAN:
+                    continue
+                xlit_indices.append(i)
+                xlit_parts.append((prefix, core, suffix))
             if not xlit_indices:
-                return text
-            spaced_batch = [_prepare_word(words[i], lang) for i in xlit_indices]
+                return " ".join(out_words)
+            spaced_batch = [
+                _prepare_word(core, lang) for _prefix, core, _suffix in xlit_parts
+            ]
             results = guarded_model_call(
                 lambda: model.translate(spaced_batch, beam=5),
                 config.INFERENCE_HARD_TIMEOUT_S,
             )
-            out_words = list(words)
-            for i, result in zip(xlit_indices, results):
-                out_words[i] = result.replace(" ", "")
+            for i, (prefix, _core, suffix), result in zip(
+                xlit_indices, xlit_parts, results
+            ):
+                out_words[i] = prefix + result.replace(" ", "") + suffix
             return " ".join(out_words)
         except Exception as exc:
             logger.warning("IndicXlit: transliteration failed for lang=%s: %s", lang, exc)
