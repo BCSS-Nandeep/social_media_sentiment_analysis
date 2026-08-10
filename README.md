@@ -249,6 +249,9 @@ Defaults are far above ordinary traffic and are env-overridable:
 | `SENTIMENT_INFERENCE_HARD_TIMEOUT_S` | 120 | Hard deadline for each model-generation call. The process exits with code 70 so PM2 can restart it if a model or CUDA call cannot return to Python. Set 0 only for non-production debugging. |
 | `SENTIMENT_TRANSLATION_OUTPUT_MAX_RATIO` | 4.0 | Rejects implausibly expanded primary translations and sends them to NLLB. |
 | `SENTIMENT_TRANSLATION_REPEAT_TOKEN_RATIO` | 0.5 | Rejects repetitive decode loops when one token dominates an output of at least eight tokens. |
+| `SENTIMENT_PIPELINE_FALLBACK_ENABLED` | true | Sends only recoverable deterministic translation/sentiment failures to Ollama after releasing the GPU inference lock. |
+| `SENTIMENT_PIPELINE_FALLBACK_TIMEOUT_S` | 60 | Timeout for the schema-constrained Ollama fallback call. Provider failure returns HTTP 503 for retry. |
+| `SENTIMENT_PIPELINE_FALLBACK_MAX_WORKERS` | 2 | Maximum concurrent Ollama fallback calls for distinct failed posts in one request. |
 | `SENTIMENT_TORCH_NUM_THREADS` | 0 (torch default) | CPU intra-op threads. Worth setting explicitly in a CPU deployment: torch sizes its default from the *visible* core count, so inside a cgroup-limited container it oversubscribes and contends. The effective value is logged at startup either way. |
 
 Inference is serialized on a lock — the pipeline is one set of torch modules
@@ -258,6 +261,22 @@ rather than to the model. To serve more concurrency, run more replicas.
 The production process manager must have automatic restart enabled: the hard
 watchdog deliberately terminates a process that cannot release the inference
 lock.
+
+### Ollama pipeline fallback
+
+The deterministic stack remains authoritative. If IndicTrans2 and NLLB cannot
+produce usable English, or the sentiment classifier fails, the service isolates
+the failed post and calls Ollama only after releasing the GPU inference lock.
+Successful neighbors in the same batch are not sent to Ollama.
+
+Ollama is constrained to return exactly `english_text`, `sentiment`, and
+`confidence`. The service rejects additional/missing fields, sentiment outside
+`Positive | Neutral | Negative`, invalid confidence, and unusable translations.
+It constructs the normal result metadata and timing fields itself, so
+`/analyze` and `/analyze/intelligence` retain their existing response schemas.
+The fallback does not perform policy mapping, risk scoring, alerting, entity
+extraction, or recommendations. If it cannot return a valid result, the request
+returns HTTP 503 instead of inventing defaults.
 
 A caller integrates purely through this HTTP contract — one example is
 SOCKEYE's backend, which can route sentiment requests here via

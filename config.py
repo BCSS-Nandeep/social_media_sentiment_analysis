@@ -215,6 +215,19 @@ INFERENCE_HARD_TIMEOUT_S: float = float(
     os.getenv("SENTIMENT_INFERENCE_HARD_TIMEOUT_S", "120")
 )
 
+# Recoverable deterministic failures can be normalized through Ollama after the
+# GPU inference lock is released. This is deliberately separate from the later
+# intelligence/policy-mapping stage.
+PIPELINE_FALLBACK_ENABLED: bool = os.getenv(
+    "SENTIMENT_PIPELINE_FALLBACK_ENABLED", "true"
+).strip().lower() in {"1", "true", "yes", "on"}
+PIPELINE_FALLBACK_TIMEOUT_S: float = float(
+    os.getenv("SENTIMENT_PIPELINE_FALLBACK_TIMEOUT_S", "60")
+)
+PIPELINE_FALLBACK_MAX_WORKERS: int = max(
+    1, int(os.getenv("SENTIMENT_PIPELINE_FALLBACK_MAX_WORKERS", "2"))
+)
+
 # --------------------------------------------------------------------------- #
 # Stage 3 — intelligence layer (Ollama)
 # --------------------------------------------------------------------------- #

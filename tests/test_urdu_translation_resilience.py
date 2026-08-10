@@ -116,6 +116,210 @@ class RomanLanguageRoutingTests(unittest.TestCase):
         self.assertEqual("ur", language)
 
 
+class PipelineOutcomeTests(unittest.TestCase):
+    @staticmethod
+    def _result(text):
+        return pipeline.PipelineResult(
+            post_text=text,
+            language="en",
+            english_text=text,
+            was_translated=False,
+            was_transliterated=False,
+            sentiment="Neutral",
+            confidence=0.8,
+            translation_time_ms=0.0,
+            sentiment_time_ms=1.0,
+            total_time_ms=1.0,
+        )
+
+    def test_batch_failure_isolates_only_the_failed_post(self):
+        service = pipeline.SentimentPipeline.__new__(pipeline.SentimentPipeline)
+        self.assertTrue(hasattr(pipeline, "PipelineFailure"))
+        self.assertTrue(hasattr(service, "predict_batch_outcomes"))
+        service._lock = threading.Lock()
+
+        def predict_locked(texts, *_args):
+            if len(texts) > 1:
+                raise translation.TranslationOutputError("batch failed")
+            if texts[0] == "bad":
+                raise translation.TranslationOutputError("post failed")
+            return [self._result(texts[0])]
+
+        service._predict_batch_locked = predict_locked
+        service._failure_context = lambda _text: ("ur", True)
+
+        outcomes = service.predict_batch_outcomes(["first", "bad", "last"])
+
+        self.assertIsInstance(outcomes[0], pipeline.PipelineResult)
+        self.assertIsInstance(outcomes[1], pipeline.PipelineFailure)
+        self.assertIsInstance(outcomes[2], pipeline.PipelineResult)
+        self.assertEqual("bad", outcomes[1].post_text)
+        self.assertEqual("ur", outcomes[1].language)
+        self.assertTrue(outcomes[1].was_transliterated)
+
+    def test_compatible_predict_batch_raises_when_failure_remains(self):
+        service = pipeline.SentimentPipeline.__new__(pipeline.SentimentPipeline)
+        self.assertTrue(hasattr(pipeline, "PipelineFailure"))
+        service.predict_batch_outcomes = lambda *_args, **_kwargs: [
+            pipeline.PipelineFailure(
+                post_text="bad",
+                language="ur",
+                was_transliterated=True,
+                deterministic_time_ms=2.0,
+                reason="post failed",
+            )
+        ]
+
+        with self.assertRaises(translation.TranslationOutputError):
+            service.predict_batch(["bad"])
+
+    def test_invalid_deterministic_result_becomes_failure(self):
+        service = pipeline.SentimentPipeline.__new__(pipeline.SentimentPipeline)
+        service._lock = threading.Lock()
+        invalid = self._result("bad")
+        invalid.sentiment = "Mixed"
+        service._predict_batch_locked = lambda *_args, **_kwargs: [invalid]
+
+        outcomes = service.predict_batch_outcomes(["bad"])
+
+        self.assertIsInstance(outcomes[0], pipeline.PipelineFailure)
+
+    def test_nonrecoverable_failure_propagates_without_item_retries(self):
+        service = pipeline.SentimentPipeline.__new__(pipeline.SentimentPipeline)
+        service._lock = threading.Lock()
+        calls = []
+
+        def fail(texts, *_args):
+            calls.append(list(texts))
+            raise MemoryError("model allocation failed")
+
+        service._predict_batch_locked = fail
+
+        with self.assertRaises(MemoryError):
+            service.predict_batch_outcomes(["first", "last"])
+
+        self.assertEqual([["first", "last"]], calls)
+
+
+class OllamaFallbackTests(unittest.TestCase):
+    class FakeProvider:
+        def __init__(self, response=None, error=None):
+            self.response = response
+            self.error = error
+            self.calls = []
+
+        def generate(self, payload, **kwargs):
+            self.calls.append((payload, kwargs))
+            if self.error:
+                raise self.error
+            return self.response
+
+        def describe(self):
+            return {"provider": "ollama", "model": "test-model"}
+
+        def health(self):
+            return True
+
+        def close(self):
+            return None
+
+    @staticmethod
+    def _failure():
+        return pipeline.PipelineFailure(
+            post_text="Jis kisi ki namaz nahi hui",
+            language="ur",
+            was_transliterated=True,
+            deterministic_time_ms=12.5,
+            reason="TranslationOutputError",
+            translation_time_ms=7.5,
+        )
+
+    def _module(self):
+        spec = importlib.util.find_spec("src.pipeline_fallback")
+        self.assertIsNotNone(spec)
+        return importlib.import_module("src.pipeline_fallback")
+
+    def test_valid_provider_response_matches_pipeline_result_schema(self):
+        module = self._module()
+        provider = self.FakeProvider(
+            {
+                "english_text": "Whoever has not performed the prayer",
+                "sentiment": "Neutral",
+                "confidence": 0.82,
+            }
+        )
+        fallback = module.OllamaPipelineFallback(
+            provider=provider, timeout_s=5
+        )
+
+        result = fallback.resolve(self._failure())
+
+        expected_keys = set(PipelineOutcomeTests._result("x").to_dict())
+        self.assertEqual(expected_keys, set(result.to_dict()))
+        self.assertEqual("Neutral", result.sentiment)
+        self.assertEqual(0.82, result.confidence)
+        self.assertEqual("ur", result.language)
+        self.assertTrue(result.was_translated)
+        self.assertTrue(result.was_transliterated)
+        self.assertGreaterEqual(result.translation_time_ms, 7.5)
+        self.assertEqual(1, len(provider.calls))
+
+    def test_invalid_provider_shapes_are_rejected(self):
+        module = self._module()
+        invalid = [
+            {"english_text": "English", "sentiment": "Neutral"},
+            {
+                "english_text": "English",
+                "sentiment": "Neutral",
+                "confidence": 0.5,
+                "extra": "not allowed",
+            },
+            {
+                "english_text": "English",
+                "sentiment": "Mixed",
+                "confidence": 0.5,
+            },
+            {
+                "english_text": "English",
+                "sentiment": "Positive",
+                "confidence": True,
+            },
+            {
+                "english_text": "English",
+                "sentiment": "Negative",
+                "confidence": float("nan"),
+            },
+            {
+                "english_text": "English",
+                "sentiment": "Negative",
+                "confidence": 1.1,
+            },
+            {
+                "english_text": "Jis kisi ki namaz nahi hui",
+                "sentiment": "Neutral",
+                "confidence": 0.5,
+            },
+        ]
+
+        for response in invalid:
+            with self.subTest(response=response):
+                fallback = module.OllamaPipelineFallback(
+                    provider=self.FakeProvider(response), timeout_s=5
+                )
+                with self.assertRaises(module.PipelineFallbackError):
+                    fallback.resolve(self._failure())
+
+    def test_provider_error_is_normalized(self):
+        module = self._module()
+        fallback = module.OllamaPipelineFallback(
+            provider=self.FakeProvider(error=TimeoutError("offline")),
+            timeout_s=5,
+        )
+
+        with self.assertRaises(module.PipelineFallbackError):
+            fallback.resolve(self._failure())
+
+
 class TranslationFallbackTests(unittest.TestCase):
     def test_translation_quality_rejects_invalid_outputs(self):
         self.assertTrue(hasattr(translation, "translation_is_usable"))
@@ -272,6 +476,43 @@ class HealthStatusTests(unittest.TestCase):
         self.assertGreater(status["generation_max_time_s"], 0)
         self.assertGreater(status["inference_hard_timeout_s"], 0)
 
+    def test_api_health_reports_pipeline_fallback_readiness(self):
+        import api_server
+
+        class FakeFallback:
+            def describe(self):
+                return {
+                    "enabled": True,
+                    "provider": "ollama",
+                    "model": "test-model",
+                    "timeout_s": 60,
+                    "max_workers": 2,
+                }
+
+            def health(self):
+                return True
+
+        original_pipeline = api_server._pipeline
+        original_analyzer = api_server._analyzer
+        original_fallback = api_server._pipeline_fallback
+        api_server._pipeline = types.SimpleNamespace(
+            device=types.SimpleNamespace(type="cuda"),
+            stage_status=lambda: {},
+        )
+        api_server._analyzer = None
+        api_server._pipeline_fallback = FakeFallback()
+        try:
+            payload = api_server.health()
+        finally:
+            api_server._pipeline = original_pipeline
+            api_server._analyzer = original_analyzer
+            api_server._pipeline_fallback = original_fallback
+
+        self.assertTrue(payload["pipeline_fallback"]["available"])
+        self.assertTrue(payload["pipeline_fallback"]["reachable"])
+        self.assertEqual("ollama", payload["pipeline_fallback"]["provider"])
+        self.assertEqual(2, payload["pipeline_fallback"]["max_workers"])
+
 
 class ApiFailureContractTests(unittest.TestCase):
     def test_translation_failure_returns_503(self):
@@ -295,6 +536,68 @@ class ApiFailureContractTests(unittest.TestCase):
 
         self.assertIsInstance(caught.exception, HTTPException)
         self.assertEqual(503, caught.exception.status_code)
+
+
+class ApiFallbackOrchestrationTests(unittest.TestCase):
+    def test_only_failures_use_fallback_after_inference_lock_release(self):
+        import api_server
+
+        first = PipelineOutcomeTests._result("first")
+        last = PipelineOutcomeTests._result("last")
+        failure = pipeline.PipelineFailure(
+            post_text="bad",
+            language="ur",
+            was_transliterated=True,
+            deterministic_time_ms=3.0,
+            reason="TranslationOutputError",
+            translation_time_ms=1.0,
+        )
+
+        class FakePipeline:
+            def predict_batch_outcomes(self, *_args, **_kwargs):
+                self.lock_was_held = api_server._inference_lock.locked()
+                return [first, failure, last]
+
+        class FakeFallback:
+            def __init__(self):
+                self.calls = []
+
+            def resolve(self, item):
+                self.calls.append(
+                    (item.post_text, api_server._inference_lock.locked())
+                )
+                return pipeline.PipelineResult(
+                    post_text=item.post_text,
+                    language=item.language,
+                    english_text="translated",
+                    was_translated=True,
+                    was_transliterated=item.was_transliterated,
+                    sentiment="Neutral",
+                    confidence=0.7,
+                    translation_time_ms=4.0,
+                    sentiment_time_ms=0.0,
+                    total_time_ms=4.0,
+                )
+
+        original_pipeline = api_server._pipeline
+        original_fallback = getattr(api_server, "_pipeline_fallback", None)
+        fake_pipeline = FakePipeline()
+        fake_fallback = FakeFallback()
+        api_server._pipeline = fake_pipeline
+        api_server._pipeline_fallback = fake_fallback
+        try:
+            self.assertTrue(hasattr(api_server, "_run_pipeline_with_fallback"))
+            results = api_server._run_pipeline_with_fallback(
+                ["first", "bad", "last"], request_id=99
+            )
+        finally:
+            api_server._pipeline = original_pipeline
+            api_server._pipeline_fallback = original_fallback
+
+        self.assertTrue(fake_pipeline.lock_was_held)
+        self.assertEqual([("bad", False)], fake_fallback.calls)
+        self.assertEqual(["first", "bad", "last"], [r.post_text for r in results])
+        self.assertEqual(4.0, results[1].translation_time_ms)
 
 
 if __name__ == "__main__":

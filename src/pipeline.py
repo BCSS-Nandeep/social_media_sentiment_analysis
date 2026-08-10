@@ -16,6 +16,7 @@ translations; it does not replace IndicTrans2 as the authoritative path.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -30,6 +31,7 @@ from src.preprocessing import clean_text
 from src.script_detection import is_latin_script
 from src.transliteration import Transliterator
 from src.translation import (
+    TranslationError,
     TranslationOutputError,
     TranslationResult,
     Translator,
@@ -61,6 +63,41 @@ class PipelineResult:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass
+class PipelineFailure:
+    """Recoverable per-post failure for the API's Ollama fallback."""
+
+    post_text: str
+    language: str
+    was_transliterated: bool
+    deterministic_time_ms: float
+    reason: str
+    translation_time_ms: float = 0.0
+
+
+class RecoverablePipelineError(RuntimeError):
+    """Typed model-stage failure that may be retried per post."""
+
+    def __init__(self, message: str, translation_time_ms: float = 0.0) -> None:
+        super().__init__(message)
+        self.translation_time_ms = max(0.0, float(translation_time_ms))
+
+
+def _raise_if_fatal_model_error(exc: Exception) -> None:
+    """Never disguise resource exhaustion or programming/invariant failures."""
+    fatal_types = (MemoryError, AssertionError, AttributeError, TypeError)
+    if isinstance(exc, fatal_types):
+        raise exc
+    if isinstance(exc, torch.cuda.OutOfMemoryError):
+        raise exc
+    message = str(exc).casefold()
+    if isinstance(exc, RuntimeError) and any(
+        marker in message
+        for marker in ("out of memory", "cuda error", "device-side assert")
+    ):
+        raise exc
 
 
 class SentimentPipeline:
@@ -180,6 +217,7 @@ class SentimentPipeline:
                 texts, languages, batch_size=batch_size
             )
         except Exception as exc:
+            _raise_if_fatal_model_error(exc)
             logger.error(
                 "Primary translator failed (%s); retrying batch with %s",
                 exc,
@@ -192,6 +230,7 @@ class SentimentPipeline:
                     texts, languages, batch_size=batch_size
                 )
             except Exception as fallback_exc:
+                _raise_if_fatal_model_error(fallback_exc)
                 raise TranslationOutputError(
                     "Primary and fallback translators both failed"
                 ) from fallback_exc
@@ -225,6 +264,7 @@ class SentimentPipeline:
                 retry_texts, retry_languages, batch_size=batch_size
             )
         except Exception as fallback_exc:
+            _raise_if_fatal_model_error(fallback_exc)
             raise TranslationOutputError(
                 "Fallback translator failed for rejected primary output"
             ) from fallback_exc
@@ -272,7 +312,30 @@ class SentimentPipeline:
         translation_batch_size: int = config.TRANSLATION_BATCH_SIZE,
         request_id: object = None,
     ) -> list[PipelineResult]:
-        """Run the full pipeline over a list of posts (order preserved).
+        """Compatibility wrapper that requires every deterministic item to pass."""
+        outcomes = self.predict_batch_outcomes(
+            texts,
+            batch_size=batch_size,
+            translation_batch_size=translation_batch_size,
+            request_id=request_id,
+        )
+        failures = [
+            outcome for outcome in outcomes if isinstance(outcome, PipelineFailure)
+        ]
+        if failures:
+            raise TranslationOutputError(
+                f"Deterministic pipeline failed for {len(failures)} post(s)"
+            )
+        return outcomes
+
+    def predict_batch_outcomes(
+        self,
+        texts: list[str],
+        batch_size: int = config.BATCH_SIZE,
+        translation_batch_size: int = config.TRANSLATION_BATCH_SIZE,
+        request_id: object = None,
+    ) -> list[PipelineResult | PipelineFailure]:
+        """Run a batch, isolating recoverable errors to individual posts.
 
         Serialized on the pipeline lock — see the class docstring. `request_id`
         is optional and purely for log correlation with the caller's own
@@ -281,7 +344,135 @@ class SentimentPipeline:
         request it was, not just which stage.
         """
         with self._lock:
-            return self._predict_batch_locked(texts, batch_size, translation_batch_size, request_id)
+            try:
+                results = self._predict_batch_locked(
+                    texts, batch_size, translation_batch_size, request_id
+                )
+                return self._validated_outcomes(results)
+            except (TranslationError, RecoverablePipelineError) as batch_exc:
+                logger.warning(
+                    "req %s: deterministic batch failed (%s); isolating %d post(s)",
+                    request_id,
+                    type(batch_exc).__name__,
+                    len(texts),
+                )
+
+            outcomes: list[PipelineResult | PipelineFailure] = []
+            for index, text in enumerate(texts):
+                started = time.perf_counter()
+                try:
+                    outcomes.extend(
+                        self._validated_outcomes(
+                            self._predict_batch_locked(
+                                [text],
+                                1,
+                                1,
+                                f"{request_id}.{index}",
+                            )
+                        )
+                    )
+                except (TranslationError, RecoverablePipelineError) as exc:
+                    language, was_transliterated = self._failure_context(text)
+                    outcomes.append(
+                        PipelineFailure(
+                            post_text=text,
+                            language=language,
+                            was_transliterated=was_transliterated,
+                            deterministic_time_ms=round(
+                                (time.perf_counter() - started) * 1000.0, 3
+                            ),
+                            reason=type(exc).__name__,
+                            translation_time_ms=round(
+                                float(
+                                    getattr(exc, "translation_time_ms", 0.0)
+                                ),
+                                3,
+                            ),
+                        )
+                    )
+            return outcomes
+
+    @staticmethod
+    def _validated_outcomes(
+        results: list[PipelineResult],
+    ) -> list[PipelineResult | PipelineFailure]:
+        """Convert malformed deterministic records into fallback candidates."""
+        outcomes: list[PipelineResult | PipelineFailure] = []
+        for result in results:
+            timings = (
+                result.translation_time_ms,
+                result.sentiment_time_ms,
+                result.total_time_ms,
+            )
+            valid = (
+                isinstance(result.english_text, str)
+                and bool(result.english_text.strip())
+                and result.sentiment in {"Positive", "Neutral", "Negative"}
+                and not isinstance(result.confidence, bool)
+                and isinstance(result.confidence, (int, float))
+                and math.isfinite(float(result.confidence))
+                and 0.0 <= float(result.confidence) <= 1.0
+                and all(
+                    isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    and math.isfinite(float(value))
+                    and float(value) >= 0.0
+                    for value in timings
+                )
+                and abs(
+                    float(result.total_time_ms)
+                    - float(
+                        result.translation_time_ms
+                        + result.sentiment_time_ms
+                    )
+                )
+                <= 0.01
+            )
+            if valid:
+                outcomes.append(result)
+                continue
+            outcomes.append(
+                PipelineFailure(
+                    post_text=result.post_text,
+                    language=result.language,
+                    was_transliterated=result.was_transliterated,
+                    deterministic_time_ms=max(
+                        0.0,
+                        float(result.total_time_ms)
+                        if isinstance(result.total_time_ms, (int, float))
+                        and math.isfinite(float(result.total_time_ms))
+                        else 0.0,
+                    ),
+                    reason="InvalidPipelineResult",
+                    translation_time_ms=max(
+                        0.0,
+                        float(result.translation_time_ms)
+                        if isinstance(
+                            result.translation_time_ms, (int, float)
+                        )
+                        and math.isfinite(float(result.translation_time_ms))
+                        else 0.0,
+                    ),
+                )
+            )
+        return outcomes
+
+    def _failure_context(self, text: str) -> tuple[str, bool]:
+        """Best-effort metadata for a failed item; never mask its root failure."""
+        try:
+            cleaned = clean_text(text)
+            languages = self.detector.detect_batch([cleaned])
+            languages = self._refine_latin_languages([cleaned], languages)
+            _working, transliterated = self._transliterate_batch(
+                [cleaned], languages
+            )
+            return languages[0], transliterated[0]
+        except Exception as exc:
+            logger.warning(
+                "Could not recover failed-post language metadata (%s)",
+                type(exc).__name__,
+            )
+            return "unknown", False
 
     def _predict_batch_locked(
         self, texts: list[str], batch_size: int, translation_batch_size: int,
@@ -314,12 +505,36 @@ class SentimentPipeline:
         t_xlit = time.perf_counter()
 
         logger.info("%s: stage=translate", tag)
-        translation = self._translate_with_fallback(
-            working_texts, languages, translation_batch_size
-        )
+        translation_started = time.perf_counter()
+        try:
+            translation = self._translate_with_fallback(
+                working_texts, languages, translation_batch_size
+            )
+        except TranslationError as exc:
+            raise RecoverablePipelineError(
+                "Deterministic translation failed",
+                translation_time_ms=(
+                    time.perf_counter() - translation_started
+                )
+                * 1000.0,
+            ) from exc
         t_translate = time.perf_counter()
         logger.info("%s: stage=sentiment", tag)
-        sentiment = self.classifier.predict(translation.texts, batch_size=batch_size)
+        try:
+            sentiment = self.classifier.predict(
+                translation.texts, batch_size=batch_size
+            )
+        except Exception as exc:
+            _raise_if_fatal_model_error(exc)
+            translation_ms = (
+                float(translation.times_ms[0])
+                if len(texts) == 1 and len(translation.times_ms) == 1
+                else 0.0
+            )
+            raise RecoverablePipelineError(
+                "Deterministic sentiment failed",
+                translation_time_ms=translation_ms,
+            ) from exc
         t_end = time.perf_counter()
         logger.info("%s: stage=done", tag)
 

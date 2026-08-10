@@ -47,7 +47,9 @@ import logging
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -57,6 +59,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 import config  # loads .env (HF_TOKEN) via load_dotenv()
+from src.pipeline_fallback import PipelineFallbackError
 from src.translation import TranslationError
 
 logging.basicConfig(
@@ -69,6 +72,8 @@ for noisy in ("transformers", "urllib3", "filelock", "huggingface_hub"):
 logger = logging.getLogger("sentiment_api")
 
 _pipeline = None  # loaded once at startup, reused across requests
+_pipeline_fallback = None  # recoverable translation/sentiment failures only
+_pipeline_fallback_executor = None  # service-wide concurrency bound
 _analyzer = None  # stage-3 intelligence layer; None when it failed to construct
 
 # Serializes model inference across the threadpool. Requests queue here; the
@@ -104,6 +109,25 @@ async def lifespan(_app: FastAPI):
         config.API_MAX_TEXTS, config.API_MAX_TEXT_CHARS, config.API_MAX_TOTAL_CHARS,
     )
 
+    global _pipeline_fallback, _pipeline_fallback_executor
+    if config.PIPELINE_FALLBACK_ENABLED:
+        try:
+            from src.pipeline_fallback import OllamaPipelineFallback
+
+            _pipeline_fallback = OllamaPipelineFallback()
+            _pipeline_fallback_executor = ThreadPoolExecutor(
+                max_workers=config.PIPELINE_FALLBACK_MAX_WORKERS,
+                thread_name_prefix="pipeline-fallback",
+            )
+            logger.info(
+                "  pipeline fallback          : %s",
+                _pipeline_fallback.describe(),
+            )
+        except Exception as exc:
+            _pipeline_fallback = None
+            _pipeline_fallback_executor = None
+            logger.error("Pipeline fallback unavailable: %s", exc)
+
     # Stage 3 is optional and must never be able to take down /analyze, so it is
     # imported and constructed defensively — a missing dependency or a bad
     # OLLAMA_BASE_URL degrades to "intelligence unavailable", not a failed boot.
@@ -128,6 +152,14 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        if _pipeline_fallback_executor is not None:
+            _pipeline_fallback_executor.shutdown(
+                wait=True, cancel_futures=True
+            )
+            _pipeline_fallback_executor = None
+        if _pipeline_fallback is not None:
+            _pipeline_fallback.close()
+            _pipeline_fallback = None
         if _analyzer is not None:
             _analyzer.close()
             _analyzer = None
@@ -244,6 +276,18 @@ def health():
             if _analyzer is not None
             else {"available": False}
         ),
+        "pipeline_fallback": (
+            {
+                "available": True,
+                **_pipeline_fallback.describe(),
+                "reachable": _pipeline_fallback.health(),
+            }
+            if _pipeline_fallback is not None
+            else {
+                "available": False,
+                "enabled": config.PIPELINE_FALLBACK_ENABLED,
+            }
+        ),
     }
 
 
@@ -274,7 +318,7 @@ def _run_pipeline(texts: list[str], request_id: int) -> list:
             )
         started = time.perf_counter()
         try:
-            results = _pipeline.predict_batch(
+            results = _pipeline.predict_batch_outcomes(
                 texts,
                 batch_size=config.BATCH_SIZE,
                 translation_batch_size=config.TRANSLATION_BATCH_SIZE,
@@ -290,10 +334,103 @@ def _run_pipeline(texts: list[str], request_id: int) -> list:
         _inference_lock.release()
 
     logger.info(
-        "req %d: pipeline completed %d text(s) in %.0f ms (%.0f ms/post, %.0f ms queued)",
+        "req %d: deterministic pipeline completed %d text(s) in %.0f ms "
+        "(%.0f ms/post, %.0f ms queued)",
         request_id, len(results), compute_ms, compute_ms / len(results), waited_ms,
     )
     return results
+
+
+def _resolve_pipeline_outcomes(outcomes: list, request_id: int) -> list:
+    """Resolve only deterministic failures, after the GPU lock is released."""
+    from src.pipeline import PipelineFailure
+
+    failures = [
+        outcome for outcome in outcomes if isinstance(outcome, PipelineFailure)
+    ]
+    if not failures:
+        return outcomes
+    if _pipeline_fallback is None:
+        raise PipelineFallbackError(
+            f"Deterministic pipeline failed for {len(failures)} post(s) and "
+            "Ollama fallback is unavailable"
+        )
+
+    unique: dict[tuple[str, str, bool], PipelineFailure] = {}
+    for failure in failures:
+        key = (
+            failure.post_text,
+            failure.language,
+            failure.was_transliterated,
+        )
+        unique.setdefault(key, failure)
+
+    logger.warning(
+        "req %d: resolving %d deterministic failure(s) through Ollama "
+        "(%d unique)",
+        request_id,
+        len(failures),
+        len(unique),
+    )
+    if _pipeline_fallback_executor is None:
+        resolved = {
+            key: _pipeline_fallback.resolve(failure)
+            for key, failure in unique.items()
+        }
+    else:
+        futures = {
+            _pipeline_fallback_executor.submit(
+                _pipeline_fallback.resolve, failure
+            ): key
+            for key, failure in unique.items()
+        }
+        resolved = {}
+        try:
+            for future in as_completed(futures):
+                resolved[futures[future]] = future.result()
+        except Exception:
+            for future in futures:
+                future.cancel()
+            raise
+
+    normalized = []
+    for outcome in outcomes:
+        if not isinstance(outcome, PipelineFailure):
+            normalized.append(outcome)
+            continue
+        key = (
+            outcome.post_text,
+            outcome.language,
+            outcome.was_transliterated,
+        )
+        base_failure = unique[key]
+        result = resolved[key]
+        provider_ms = max(
+            0.0,
+            result.translation_time_ms
+            - base_failure.translation_time_ms,
+        )
+        translation_ms = round(
+            outcome.translation_time_ms + provider_ms, 3
+        )
+        normalized.append(
+            replace(
+                result,
+                post_text=outcome.post_text,
+                language=outcome.language,
+                was_transliterated=outcome.was_transliterated,
+                translation_time_ms=translation_ms,
+                total_time_ms=round(
+                    translation_ms + result.sentiment_time_ms, 3
+                ),
+            )
+        )
+    return normalized
+
+
+def _run_pipeline_with_fallback(texts: list[str], request_id: int) -> list:
+    outcomes = _run_pipeline(texts, request_id)
+    return _resolve_pipeline_outcomes(outcomes, request_id)
 
 
 @app.post("/analyze")
@@ -309,8 +446,8 @@ def analyze(req: AnalyzeRequest):
         "req %d: received %d text(s), %d chars", request_id, len(req.texts), total_chars
     )
     try:
-        results = _run_pipeline(req.texts, request_id)
-    except (TimeoutError, TranslationError) as e:
+        results = _run_pipeline_with_fallback(req.texts, request_id)
+    except (TimeoutError, TranslationError, PipelineFallbackError) as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     return {"results": [r.to_dict() for r in results]}
 
@@ -351,8 +488,8 @@ def analyze_intelligence(req: AnalyzeRequest):
     )
 
     try:
-        results = _run_pipeline(req.texts, request_id)
-    except (TimeoutError, TranslationError) as e:
+        results = _run_pipeline_with_fallback(req.texts, request_id)
+    except (TimeoutError, TranslationError, PipelineFallbackError) as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     payloads = [r.to_dict() for r in results]
 
