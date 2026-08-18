@@ -7,6 +7,7 @@ from collections.abc import Callable
 
 import config
 from src.intelligence import OllamaProvider
+from src.ollama_gate import OllamaCircuitOpen, OllamaGateFull
 from src.pipeline import PipelineFailure, PipelineResult
 from src.translation import translation_is_usable
 
@@ -98,7 +99,7 @@ class OllamaPipelineFallback:
             english_text, sentiment, confidence = self._validate(
                 response, failure
             )
-        except PipelineFallbackError:
+        except (PipelineFallbackError, OllamaGateFull, OllamaCircuitOpen):
             raise
         except Exception as exc:
             raise PipelineFallbackError(

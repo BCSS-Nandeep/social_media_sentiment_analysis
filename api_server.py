@@ -60,6 +60,7 @@ from pydantic import BaseModel, Field
 
 import config  # loads .env (HF_TOKEN) via load_dotenv()
 from src.fallback_queue import BoundedWorkQueue, FallbackQueueFull
+from src.ollama_gate import OllamaCircuitOpen, OllamaGateFull, get_ollama_gate
 from src.pipeline_fallback import PipelineFallbackError
 from src.translation import TranslationError
 
@@ -310,6 +311,7 @@ def health():
             if _analyzer is not None
             else {"available": False}
         ),
+        "ollama_gate": get_ollama_gate().stats(),
         "pipeline_fallback": (
             {
                 "available": True,
@@ -506,6 +508,18 @@ def analyze(req: AnalyzeRequest):
     )
     try:
         results = _run_pipeline_with_fallback(req.texts, request_id)
+    except OllamaGateFull as e:
+        raise HTTPException(
+            status_code=429,
+            detail=str(e),
+            headers={"Retry-After": str(int(e.retry_after_s))},
+        ) from e
+    except OllamaCircuitOpen as e:
+        raise HTTPException(
+            status_code=503,
+            detail=str(e),
+            headers={"Retry-After": str(int(e.retry_after_s))},
+        ) from e
     except (TimeoutError, TranslationError, PipelineFallbackError) as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     return {"results": [r.to_dict() for r in results]}
@@ -548,14 +562,39 @@ def analyze_intelligence(req: AnalyzeRequest):
 
     try:
         results = _run_pipeline_with_fallback(req.texts, request_id)
+    except OllamaGateFull as e:
+        raise HTTPException(
+            status_code=429,
+            detail=str(e),
+            headers={"Retry-After": str(int(e.retry_after_s))},
+        ) from e
+    except OllamaCircuitOpen as e:
+        raise HTTPException(
+            status_code=503,
+            detail=str(e),
+            headers={"Retry-After": str(int(e.retry_after_s))},
+        ) from e
     except (TimeoutError, TranslationError, PipelineFallbackError) as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     payloads = [r.to_dict() for r in results]
 
     started = time.perf_counter()
-    records = _analyzer.analyze_batch(
-        payloads, pack=pack, intent_mode=intent_mode, timeout_s=timeout_s,
-    )
+    try:
+        records = _analyzer.analyze_batch(
+            payloads, pack=pack, intent_mode=intent_mode, timeout_s=timeout_s,
+        )
+    except OllamaGateFull as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+            headers={"Retry-After": str(int(exc.retry_after_s))},
+        ) from exc
+    except OllamaCircuitOpen as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+            headers={"Retry-After": str(int(exc.retry_after_s))},
+        ) from exc
     logger.info(
         "req %d: intelligence completed in %.0f ms",
         request_id, (time.perf_counter() - started) * 1000.0,

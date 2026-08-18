@@ -28,6 +28,11 @@ from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 
 import config
+from src.ollama_gate import (
+    OllamaCircuitOpen,
+    OllamaGateFull,
+    get_ollama_gate,
+)
 from src.script_detection import LATIN_RANGE, UNICODE_RANGES
 
 logger = logging.getLogger("benchmark.intelligence")
@@ -699,6 +704,7 @@ class OllamaProvider(IntelligenceProvider):
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
             "stream": False,
+            "keep_alive": config.OLLAMA_KEEP_ALIVE,
             "options": {
                 "temperature": config.OLLAMA_TEMPERATURE,
                 "num_ctx": config.OLLAMA_NUM_CTX,
@@ -719,41 +725,43 @@ class OllamaProvider(IntelligenceProvider):
     ) -> dict:
         timeout = self.timeout_s if timeout_s is None else timeout_s
         last_error: Exception | None = None
-        for attempt in range(self.retries + 1):
-            use_schema = self._use_schema
-            try:
-                response = self._session.post(
-                    f"{self.base_url}/api/chat",
-                    json=self._body(payload, use_schema, system_prompt, schema),
-                    timeout=timeout,
-                )
-                if use_schema and response.status_code == 400:
-                    with self._lock:
-                        if self._use_schema:
-                            logger.warning(
-                                "Ollama at %s rejected a JSON schema (400) — falling "
-                                "back to format=\"json\" for the rest of this process.",
-                                self.base_url,
-                            )
-                            self._use_schema = False
+        gate = get_ollama_gate()
+        with gate.slot():
+            for attempt in range(self.retries + 1):
+                use_schema = self._use_schema
+                try:
                     response = self._session.post(
                         f"{self.base_url}/api/chat",
-                        json=self._body(payload, False, system_prompt, schema),
+                        json=self._body(payload, use_schema, system_prompt, schema),
                         timeout=timeout,
                     )
-                response.raise_for_status()
-                content = response.json().get("message", {}).get("content", "")
-                return _parse_json_object(content)
-            except Exception as exc:
-                last_error = exc
-                if attempt < self.retries:
-                    logger.warning(
-                        "Ollama attempt %d/%d failed (%s) — retrying.",
-                        attempt + 1, self.retries + 1, exc,
-                    )
-        raise RuntimeError(
-            f"Ollama request failed after {self.retries + 1} attempt(s): {last_error}"
-        )
+                    if use_schema and response.status_code == 400:
+                        with self._lock:
+                            if self._use_schema:
+                                logger.warning(
+                                    "Ollama at %s rejected a JSON schema (400) — falling "
+                                    "back to format=\"json\" for the rest of this process.",
+                                    self.base_url,
+                                )
+                                self._use_schema = False
+                        response = self._session.post(
+                            f"{self.base_url}/api/chat",
+                            json=self._body(payload, False, system_prompt, schema),
+                            timeout=timeout,
+                        )
+                    response.raise_for_status()
+                    content = response.json().get("message", {}).get("content", "")
+                    return _parse_json_object(content)
+                except Exception as exc:
+                    last_error = exc
+                    if attempt < self.retries:
+                        logger.warning(
+                            "Ollama attempt %d/%d failed (%s) — retrying.",
+                            attempt + 1, self.retries + 1, exc,
+                        )
+            raise RuntimeError(
+                f"Ollama request failed after {self.retries + 1} attempt(s): {last_error}"
+            )
 
     def close(self) -> None:
         try:
@@ -849,6 +857,8 @@ class IntelligenceAnalyzer:
                 schema=schema,
                 timeout_s=timeout_s,
             )
+        except (OllamaGateFull, OllamaCircuitOpen):
+            raise
         except Exception as exc:
             logger.error("Intelligence provider failed: %s", exc)
             record = _insufficient(
@@ -902,7 +912,10 @@ class IntelligenceAnalyzer:
             first_index[key] = i
             todo.append(i)
 
-        workers = max(1, min(config.OLLAMA_CONCURRENCY, len(todo)))
+        workers = max(
+            1,
+            min(config.OLLAMA_CONCURRENCY, get_ollama_gate().size, len(todo)),
+        )
         started = time.perf_counter()
         computed: dict[int, IntelligenceResult] = {}
 
