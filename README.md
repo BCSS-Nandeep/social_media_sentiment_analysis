@@ -49,6 +49,33 @@ general language detector (lingua/langdetect) has no romanized-language
 profiles and misreads this text as English — IndicLID exists specifically to
 catch and correct that before the bypass decision is made.
 
+**Observed production split (latest analyzed window, percentages only):**
+
+```
+                         Posts
+                           │
+                           ▼
+                 Main Deterministic Pipeline
+                           │
+             ┌─────────────┴─────────────┐
+             │                           │
+          99.892%                      0.107%
+             │                           │
+             ▼                           ▼
+       Sentiment ready             Ollama fallback
+             │                           │
+             │                           ▼
+             │                 Translation / Sentiment
+             │                           │
+             └──────────────┬────────────┘
+                            │
+                            ▼
+                    Ollama Intelligence
+                            │
+                            ▼
+                      Extra Metrics
+```
+
 ## How to run — step by step
 
 ### Step 0. Prerequisites
@@ -400,10 +427,14 @@ python verify_intelligence_contract.py
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama host — point at your other server |
 | `OLLAMA_MODEL` | `llama3.1:8b` | Model tag |
 | `OLLAMA_TIMEOUT_S` | 120 | Per-request timeout |
-| `OLLAMA_RETRIES` | 2 | Retries on transport failure or unparseable output |
-| `OLLAMA_CONCURRENCY` | 4 | Parallel calls per batch |
+| `OLLAMA_RETRIES` | 0 | In-process Ollama retries (0 = caller owns retry) |
+| `OLLAMA_CONCURRENCY` | 2 | Parallel calls per batch (capped by gate size) |
+| `OLLAMA_GATE_SIZE` | 2 | Process-wide in-flight cap (align with GPU NUM_PARALLEL) |
+| `OLLAMA_KEEP_ALIVE` | `24h` | Sent on every /api/chat so the model stays loaded |
+| `OLLAMA_CIRCUIT_FAILURES` | 8 | Consecutive failures before the circuit opens |
+| `OLLAMA_CIRCUIT_COOLDOWN_S` | 30 | How long the circuit stays open |
 | `OLLAMA_TEMPERATURE` | 0 | 0 for reproducible assessments |
-| `OLLAMA_NUM_PREDICT` | 512 | Max generation tokens |
+| `OLLAMA_NUM_PREDICT` | 256 | Max generation tokens |
 | `OLLAMA_JSON_SCHEMA` | 1 | Constrain decoding to the schema (Ollama ≥ 0.5); auto-downgrades if the server rejects it |
 | `SENTIMENT_INTELLIGENCE_PROVIDER` | `ollama` | Selects the provider from the registry |
 
