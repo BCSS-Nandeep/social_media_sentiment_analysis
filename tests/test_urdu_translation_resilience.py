@@ -106,7 +106,7 @@ class RomanLanguageRoutingTests(unittest.TestCase):
         detector = lid_roman.RomanLanguageDetector.__new__(
             lid_roman.RomanLanguageDetector
         )
-        detector._ftr_predict = lambda _text: ("eng_Latn", 0.999)
+        detector._ftr_topk = lambda _text: [("eng_Latn", 0.999), ("urd_Latn", 0.001)]
         detector._bert_predict = lambda _text: "urd_Latn"
 
         language = detector.detect(

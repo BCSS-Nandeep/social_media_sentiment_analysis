@@ -1,0 +1,1896 @@
+{
+  "notes": "Author-constructed short-text LID set for Romanized Telugu vs English routing. Not a sampled production corpus. Ambiguous one-word items have no gold language. gold_route=indic means any non-English Indic route is a true positive (bypass is the failure). Limitations: synthetic, Telugu-cue heavy, numbered variants used to reach n=100, no crowd labels, sentiment labels only on clear English items.",
+  "target_counts": {
+    "short_tenglish": 100,
+    "short_english": 100,
+    "tenglish_english": 50,
+    "ambiguous": 50
+  },
+  "posts": [
+    {
+      "id": "short_tenglish-001",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi"
+    },
+    {
+      "id": "short_tenglish-002",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala mass ga undi"
+    },
+    {
+      "id": "short_tenglish-003",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "em chestunnav"
+    },
+    {
+      "id": "short_tenglish-004",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "mana vallu super"
+    },
+    {
+      "id": "short_tenglish-005",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "adi nijam ra"
+    },
+    {
+      "id": "short_tenglish-006",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "bagundi ra"
+    },
+    {
+      "id": "short_tenglish-007",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "super undi"
+    },
+    {
+      "id": "short_tenglish-008",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chaala baagundi"
+    },
+    {
+      "id": "short_tenglish-009",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "enti idi"
+    },
+    {
+      "id": "short_tenglish-010",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "ela unnaru"
+    },
+    {
+      "id": "short_tenglish-011",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "nenu bagunna"
+    },
+    {
+      "id": "short_tenglish-012",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "inka ledu"
+    },
+    {
+      "id": "short_tenglish-013",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "enduku ra"
+    },
+    {
+      "id": "short_tenglish-014",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "emi ayyindi"
+    },
+    {
+      "id": "short_tenglish-015",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "ipudu unnadi"
+    },
+    {
+      "id": "short_tenglish-016",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chalu ra"
+    },
+    {
+      "id": "short_tenglish-017",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "unna ra"
+    },
+    {
+      "id": "short_tenglish-018",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "cheyandi please"
+    },
+    {
+      "id": "short_tenglish-019",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "bagunna ra"
+    },
+    {
+      "id": "short_tenglish-020",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "undi ra"
+    },
+    {
+      "id": "short_tenglish-021",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala undi"
+    },
+    {
+      "id": "short_tenglish-022",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "mass ga undi"
+    },
+    {
+      "id": "short_tenglish-023",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "nijam ra"
+    },
+    {
+      "id": "short_tenglish-024",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "enti ra"
+    },
+    {
+      "id": "short_tenglish-025",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "unnaru andi"
+    },
+    {
+      "id": "short_tenglish-026",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "vallu bagundi"
+    },
+    {
+      "id": "short_tenglish-027",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "nenu unna"
+    },
+    {
+      "id": "short_tenglish-028",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala chalu"
+    },
+    {
+      "id": "short_tenglish-029",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "ledu ra"
+    },
+    {
+      "id": "short_tenglish-030",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "ayyindi ra"
+    },
+    {
+      "id": "short_tenglish-031",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "undhi ra"
+    },
+    {
+      "id": "short_tenglish-032",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "inka undi"
+    },
+    {
+      "id": "short_tenglish-033",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "kaani ledu"
+    },
+    {
+      "id": "short_tenglish-034",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "kada ra"
+    },
+    {
+      "id": "short_tenglish-035",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "gaa undi"
+    },
+    {
+      "id": "short_tenglish-036",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "ani chalu"
+    },
+    {
+      "id": "short_tenglish-037",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chestunnav ra"
+    },
+    {
+      "id": "short_tenglish-038",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "bagundi kada"
+    },
+    {
+      "id": "short_tenglish-039",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala nijam"
+    },
+    {
+      "id": "short_tenglish-040",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "em ayyindi"
+    },
+    {
+      "id": "short_tenglish-041",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "ela undi"
+    },
+    {
+      "id": "short_tenglish-042",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "mana undi"
+    },
+    {
+      "id": "short_tenglish-043",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "super ga undi"
+    },
+    {
+      "id": "short_tenglish-044",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala super undi"
+    },
+    {
+      "id": "short_tenglish-045",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "baagundi ra"
+    },
+    {
+      "id": "short_tenglish-046",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chaala undi"
+    },
+    {
+      "id": "short_tenglish-047",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "nenu chestunnav"
+    },
+    {
+      "id": "short_tenglish-048",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "vallu unnaru"
+    },
+    {
+      "id": "short_tenglish-049",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "adi undi"
+    },
+    {
+      "id": "short_tenglish-050",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "enti ayyindi"
+    },
+    {
+      "id": "short_tenglish-051",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 1"
+    },
+    {
+      "id": "short_tenglish-052",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 2"
+    },
+    {
+      "id": "short_tenglish-053",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 3"
+    },
+    {
+      "id": "short_tenglish-054",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 4"
+    },
+    {
+      "id": "short_tenglish-055",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 5"
+    },
+    {
+      "id": "short_tenglish-056",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 6"
+    },
+    {
+      "id": "short_tenglish-057",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 7"
+    },
+    {
+      "id": "short_tenglish-058",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 8"
+    },
+    {
+      "id": "short_tenglish-059",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 9"
+    },
+    {
+      "id": "short_tenglish-060",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 10"
+    },
+    {
+      "id": "short_tenglish-061",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 11"
+    },
+    {
+      "id": "short_tenglish-062",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 12"
+    },
+    {
+      "id": "short_tenglish-063",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 13"
+    },
+    {
+      "id": "short_tenglish-064",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 14"
+    },
+    {
+      "id": "short_tenglish-065",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 15"
+    },
+    {
+      "id": "short_tenglish-066",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 16"
+    },
+    {
+      "id": "short_tenglish-067",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 17"
+    },
+    {
+      "id": "short_tenglish-068",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 18"
+    },
+    {
+      "id": "short_tenglish-069",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 19"
+    },
+    {
+      "id": "short_tenglish-070",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 20"
+    },
+    {
+      "id": "short_tenglish-071",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 21"
+    },
+    {
+      "id": "short_tenglish-072",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 22"
+    },
+    {
+      "id": "short_tenglish-073",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 23"
+    },
+    {
+      "id": "short_tenglish-074",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 24"
+    },
+    {
+      "id": "short_tenglish-075",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 25"
+    },
+    {
+      "id": "short_tenglish-076",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 26"
+    },
+    {
+      "id": "short_tenglish-077",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 27"
+    },
+    {
+      "id": "short_tenglish-078",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 28"
+    },
+    {
+      "id": "short_tenglish-079",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 29"
+    },
+    {
+      "id": "short_tenglish-080",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 30"
+    },
+    {
+      "id": "short_tenglish-081",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 31"
+    },
+    {
+      "id": "short_tenglish-082",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 32"
+    },
+    {
+      "id": "short_tenglish-083",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 33"
+    },
+    {
+      "id": "short_tenglish-084",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 34"
+    },
+    {
+      "id": "short_tenglish-085",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 35"
+    },
+    {
+      "id": "short_tenglish-086",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 36"
+    },
+    {
+      "id": "short_tenglish-087",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 37"
+    },
+    {
+      "id": "short_tenglish-088",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 38"
+    },
+    {
+      "id": "short_tenglish-089",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 39"
+    },
+    {
+      "id": "short_tenglish-090",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 40"
+    },
+    {
+      "id": "short_tenglish-091",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 41"
+    },
+    {
+      "id": "short_tenglish-092",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 42"
+    },
+    {
+      "id": "short_tenglish-093",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 43"
+    },
+    {
+      "id": "short_tenglish-094",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 44"
+    },
+    {
+      "id": "short_tenglish-095",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 45"
+    },
+    {
+      "id": "short_tenglish-096",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 46"
+    },
+    {
+      "id": "short_tenglish-097",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 47"
+    },
+    {
+      "id": "short_tenglish-098",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 48"
+    },
+    {
+      "id": "short_tenglish-099",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 49"
+    },
+    {
+      "id": "short_tenglish-100",
+      "split": "short_tenglish",
+      "gold_route": "indic",
+      "text": "chala bagundi ra 50"
+    },
+    {
+      "id": "short_english-001",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "very good",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-002",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "good app",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-003",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "nice work",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-004",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "great job",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-005",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "good move",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-006",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "this is amazing",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-007",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "very useful",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-008",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "super app",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-009",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "loved it",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-010",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "works well",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-011",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "please fix this",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-012",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "worst experience",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-013",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "highly recommended",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-014",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "not working",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-015",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "so smooth",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-016",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "really fast",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-017",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "total waste",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-018",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "thank you",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-019",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "great update",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-020",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "bad service",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-021",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "good service",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-022",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "nice app",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-023",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "very bad",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-024",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "this is good",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-025",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "amazing work",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-026",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "keep it up",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-027",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "well done",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-028",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "poor quality",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-029",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "fast delivery",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-030",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "slow response",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-031",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "happy with this",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-032",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "not happy",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-033",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "please help",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-034",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "fix it now",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-035",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "app crashed",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-036",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "login failed",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-037",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "update is good",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-038",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "new feature rocks",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-039",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "this is useful",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-040",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "not useful",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-041",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "great product",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-042",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "bad product",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-043",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "excellent work",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-044",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "terrible app",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-045",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "love this app",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-046",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "hate this bug",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-047",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "smooth and fast",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-048",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "too slow",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-049",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "worth the money",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-050",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "waste of money",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-051",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "customer care is good",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-052",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "no response yet",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-053",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "waiting for update"
+    },
+    {
+      "id": "short_english-054",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "the app is fine",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-055",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "it is okay",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-056",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "yes this works"
+    },
+    {
+      "id": "short_english-057",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "no this failed"
+    },
+    {
+      "id": "short_english-058",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "today it crashed",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-059",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "now it works",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-060",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "just installed this"
+    },
+    {
+      "id": "short_english-061",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "only one issue"
+    },
+    {
+      "id": "short_english-062",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "very disappointing",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-063",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "really impressive",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-064",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "so helpful",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-065",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "too expensive",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-066",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "best app ever",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-067",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "worst app ever",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-068",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "free and useful",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-069",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "please add this"
+    },
+    {
+      "id": "short_english-070",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "job well done",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-071",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "work in progress"
+    },
+    {
+      "id": "short_english-072",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "see you later"
+    },
+    {
+      "id": "short_english-073",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "see this update"
+    },
+    {
+      "id": "short_english-074",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "meeting was good"
+    },
+    {
+      "id": "short_english-075",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "clarity is missing",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-076",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "implementation failed",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-077",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "promises were broken",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-078",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "hospital services good"
+    },
+    {
+      "id": "short_english-079",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "fee is high",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-080",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "thank you team"
+    },
+    {
+      "id": "short_english-081",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "outstanding work",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-082",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "power cuts again",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-083",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "food was great",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-084",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "crowd was huge"
+    },
+    {
+      "id": "short_english-085",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "rally was peaceful"
+    },
+    {
+      "id": "short_english-086",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "success at last",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-087",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "failed again",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-088",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "okay for now"
+    },
+    {
+      "id": "short_english-089",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "wow this works",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-090",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "super smooth update",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-091",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "best so far",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-092",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "worst so far",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-093",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "this is perfect",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-094",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "this is terrible",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-095",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "good job team",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-096",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "nice update",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-097",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "bad update",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-098",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "very nice",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "short_english-099",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "really bad",
+      "expected_sentiment": "Negative"
+    },
+    {
+      "id": "short_english-100",
+      "split": "short_english",
+      "gold_route": "en",
+      "text": "the new update is smooth",
+      "expected_sentiment": "Positive"
+    },
+    {
+      "id": "tenglish_english-001",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "chala mass ga undi Good move"
+    },
+    {
+      "id": "tenglish_english-002",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "super ga undi"
+    },
+    {
+      "id": "tenglish_english-003",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "Good ga undi"
+    },
+    {
+      "id": "tenglish_english-004",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "very bagundi"
+    },
+    {
+      "id": "tenglish_english-005",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "nice kada"
+    },
+    {
+      "id": "tenglish_english-006",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "super app ra"
+    },
+    {
+      "id": "tenglish_english-007",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "Trailer chala mass ga undi. Waiting for theatrical. Good move."
+    },
+    {
+      "id": "tenglish_english-008",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "nenu bagunna but service worst undi please fix ra"
+    },
+    {
+      "id": "tenglish_english-009",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "this app chala bagundi"
+    },
+    {
+      "id": "tenglish_english-010",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "good app kada"
+    },
+    {
+      "id": "tenglish_english-011",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "nice work ra"
+    },
+    {
+      "id": "tenglish_english-012",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "great job undi"
+    },
+    {
+      "id": "tenglish_english-013",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "very useful undi"
+    },
+    {
+      "id": "tenglish_english-014",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "super undi Good move"
+    },
+    {
+      "id": "tenglish_english-015",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "waiting chala undi"
+    },
+    {
+      "id": "tenglish_english-016",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "please fix ra chala worst undi"
+    },
+    {
+      "id": "tenglish_english-017",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "Loved it chala bagundi"
+    },
+    {
+      "id": "tenglish_english-018",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "worst undi please fix"
+    },
+    {
+      "id": "tenglish_english-019",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "update chalu ra"
+    },
+    {
+      "id": "tenglish_english-020",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "feature chala mass ga undi"
+    },
+    {
+      "id": "tenglish_english-021",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "this is amazing kada"
+    },
+    {
+      "id": "tenglish_english-022",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "good move ra"
+    },
+    {
+      "id": "tenglish_english-023",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "nice app undi"
+    },
+    {
+      "id": "tenglish_english-024",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "service kharab undi"
+    },
+    {
+      "id": "tenglish_english-025",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "app crash ayyindi ra"
+    },
+    {
+      "id": "tenglish_english-026",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "login ledu ra"
+    },
+    {
+      "id": "tenglish_english-027",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "response chala slow undi"
+    },
+    {
+      "id": "tenglish_english-028",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "team super undi"
+    },
+    {
+      "id": "tenglish_english-029",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "fix cheyandi please"
+    },
+    {
+      "id": "tenglish_english-030",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "today meeting chalu"
+    },
+    {
+      "id": "tenglish_english-031",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "implementation ledu kada"
+    },
+    {
+      "id": "tenglish_english-032",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "help ayyindi thanks"
+    },
+    {
+      "id": "tenglish_english-033",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "scheme chala bagundi"
+    },
+    {
+      "id": "tenglish_english-034",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "village lo help ayyindi"
+    },
+    {
+      "id": "tenglish_english-035",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "power cuts chala worst undi"
+    },
+    {
+      "id": "tenglish_english-036",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "food bagundi ra"
+    },
+    {
+      "id": "tenglish_english-037",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "crowd chala undi"
+    },
+    {
+      "id": "tenglish_english-038",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "success ayyindi ra"
+    },
+    {
+      "id": "tenglish_english-039",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "failed ayyindi please fix"
+    },
+    {
+      "id": "tenglish_english-040",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "best app kada"
+    },
+    {
+      "id": "tenglish_english-041",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "worst app ra undi"
+    },
+    {
+      "id": "tenglish_english-042",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "thank you chala"
+    },
+    {
+      "id": "tenglish_english-043",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "wow bagundi"
+    },
+    {
+      "id": "tenglish_english-044",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "super smooth ga undi"
+    },
+    {
+      "id": "tenglish_english-045",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "great update kada"
+    },
+    {
+      "id": "tenglish_english-046",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "bad service undi ra"
+    },
+    {
+      "id": "tenglish_english-047",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "very good kada"
+    },
+    {
+      "id": "tenglish_english-048",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "this works undi"
+    },
+    {
+      "id": "tenglish_english-049",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "not working ledu"
+    },
+    {
+      "id": "tenglish_english-050",
+      "split": "tenglish_english",
+      "gold_route": "indic",
+      "text": "please wait undi"
+    },
+    {
+      "id": "ambiguous-001",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "super"
+    },
+    {
+      "id": "ambiguous-002",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "mass"
+    },
+    {
+      "id": "ambiguous-003",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "nice"
+    },
+    {
+      "id": "ambiguous-004",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "good"
+    },
+    {
+      "id": "ambiguous-005",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "bad"
+    },
+    {
+      "id": "ambiguous-006",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "great"
+    },
+    {
+      "id": "ambiguous-007",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "wow"
+    },
+    {
+      "id": "ambiguous-008",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "ok"
+    },
+    {
+      "id": "ambiguous-009",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "okay"
+    },
+    {
+      "id": "ambiguous-010",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "best"
+    },
+    {
+      "id": "ambiguous-011",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "worst"
+    },
+    {
+      "id": "ambiguous-012",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "free"
+    },
+    {
+      "id": "ambiguous-013",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "cool"
+    },
+    {
+      "id": "ambiguous-014",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "fine"
+    },
+    {
+      "id": "ambiguous-015",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "yes"
+    },
+    {
+      "id": "ambiguous-016",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "no"
+    },
+    {
+      "id": "ambiguous-017",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "help"
+    },
+    {
+      "id": "ambiguous-018",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "please"
+    },
+    {
+      "id": "ambiguous-019",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "thanks"
+    },
+    {
+      "id": "ambiguous-020",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "bro"
+    },
+    {
+      "id": "ambiguous-021",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "dude"
+    },
+    {
+      "id": "ambiguous-022",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "lol"
+    },
+    {
+      "id": "ambiguous-023",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "omg"
+    },
+    {
+      "id": "ambiguous-024",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "idk"
+    },
+    {
+      "id": "ambiguous-025",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "app"
+    },
+    {
+      "id": "ambiguous-026",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "update"
+    },
+    {
+      "id": "ambiguous-027",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "fix"
+    },
+    {
+      "id": "ambiguous-028",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "team"
+    },
+    {
+      "id": "ambiguous-029",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "move"
+    },
+    {
+      "id": "ambiguous-030",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "job"
+    },
+    {
+      "id": "ambiguous-031",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "work"
+    },
+    {
+      "id": "ambiguous-032",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "service"
+    },
+    {
+      "id": "ambiguous-033",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "love"
+    },
+    {
+      "id": "ambiguous-034",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "hate"
+    },
+    {
+      "id": "ambiguous-035",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "win"
+    },
+    {
+      "id": "ambiguous-036",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "fail"
+    },
+    {
+      "id": "ambiguous-037",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "go"
+    },
+    {
+      "id": "ambiguous-038",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "come"
+    },
+    {
+      "id": "ambiguous-039",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "see"
+    },
+    {
+      "id": "ambiguous-040",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "wait"
+    },
+    {
+      "id": "ambiguous-041",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "pro"
+    },
+    {
+      "id": "ambiguous-042",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "max"
+    },
+    {
+      "id": "ambiguous-043",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "lite"
+    },
+    {
+      "id": "ambiguous-044",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "plus"
+    },
+    {
+      "id": "ambiguous-045",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "star"
+    },
+    {
+      "id": "ambiguous-046",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "fire"
+    },
+    {
+      "id": "ambiguous-047",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "lit"
+    },
+    {
+      "id": "ambiguous-048",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "true"
+    },
+    {
+      "id": "ambiguous-049",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "false"
+    },
+    {
+      "id": "ambiguous-050",
+      "split": "ambiguous",
+      "gold_route": "ambiguous",
+      "text": "same"
+    }
+  ]
+}

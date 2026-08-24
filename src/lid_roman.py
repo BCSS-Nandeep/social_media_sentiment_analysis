@@ -37,6 +37,7 @@ unique_indic_language, because lingua has no KN/ML profiles.
 from __future__ import annotations
 
 import logging
+import re
 import tempfile
 import urllib.request
 import zipfile
@@ -60,18 +61,33 @@ FTR_CONFIDENCE_THRESHOLD = 0.6  # same default AI4Bharat's own IndicLID class us
 # IndicLID paper: accuracy collapses below ~10 words and FTR is often
 # confidently wrong on romanized vs English.
 FTR_ALTERNATE_INDIC_MIN_SCORE = 0.15
+# Residual (English-stripped) FTR is only consulted after full-text FTR/BERT
+# already said English. 0.25 sits below the English-heavy Tenglish recovery
+# score seen in probes (~0.33) and well above stray-token noise.
+FTR_RESIDUAL_INDIC_MIN_SCORE = 0.25
 FTR_TOPK = 3
 
-# High-precision romanized cues — not a general dictionary. English-looking
-# posts without these stay English even if FTR has a weak Telugu tail.
-_ROMANIZED_INDIC_CUES = frozenset(
-    {
-        "chala", "undi", "nenu", "chalu", "bagunna", "ayyindi", "unnadi",
-        "thumba", "romba", "irukku", "aanu", "aahe", "kharab", "bakwas",
-        "bilkul", "cheyandi", "ledu", "undhi", "unna", "emi", "enduku",
-        "ipudu", "inka", "kaani", "kada", "gaa", "ani",
-    }
-)
+# High-precision romanized function/content words, mapped to a language.
+# Not a general dictionary: English-looking posts without these stay English.
+# Sources: existing production cues; attested Telugu roman function words
+# (chala/undi/nenu/…); Dravidian/Hindi counterparts already used in routing.
+# Spelling variants are matched by collapsing repeated letters (chaala→chala).
+_ROMANIZED_INDIC_CUE_LANG: dict[str, str] = {
+    "chala": "te", "undi": "te", "nenu": "te", "chalu": "te", "bagunna": "te",
+    "ayyindi": "te", "unnadi": "te", "cheyandi": "te", "ledu": "te",
+    "undhi": "te", "unna": "te", "emi": "te", "enduku": "te", "ipudu": "te",
+    "inka": "te", "kaani": "te", "kada": "te", "gaa": "te", "ani": "te",
+    "bagundi": "te", "baagundi": "te", "chestunnav": "te", "nijam": "te",
+    "enti": "te", "unnaru": "te", "vallu": "te", "ra": "te",
+    "thumba": "kn",
+    "romba": "ta", "irukku": "ta",
+    "aanu": "ml",
+    "aahe": "mr",
+    "kharab": "hi", "bakwas": "hi", "bilkul": "hi",
+}
+_ROMANIZED_INDIC_CUES = frozenset(_ROMANIZED_INDIC_CUE_LANG)
+_CUE_REPEAT_RE = re.compile(r"(.)\1+")
+_LATIN_SPLIT_RE = re.compile(r"[.!,?;:]+")
 
 # Both FTR and BERT share this label space (BERT's classifier head has
 # exactly 22 outputs: the *_Latn codes below + 'other' — verified by loading
@@ -89,20 +105,62 @@ LABEL_TO_LANG: dict[str, str] = {
 }
 
 
-def romanized_indic_cue_count(text: str) -> int:
+def _cue_lookup_keys(core: str) -> list[str]:
+    folded = core.casefold()
+    collapsed = _CUE_REPEAT_RE.sub(r"\1", folded)
+    if collapsed == folded:
+        return [folded]
+    return [folded, collapsed]
+
+
+def _romanized_indic_cue_hits(text: str) -> list[tuple[str, str]]:
     from src.transliteration import ROMAN_WORD_RE, should_preserve_roman
 
-    n = 0
-    for token in text.replace(".", " ").split():
+    hits: list[tuple[str, str]] = []
+    for token in _LATIN_SPLIT_RE.sub(" ", text).split():
         match = ROMAN_WORD_RE.fullmatch(token)
         if not match:
             continue
-        core = match.group(2).casefold()
-        if should_preserve_roman(match.group(2)):
+        core = match.group(2)
+        if should_preserve_roman(core):
             continue
-        if core in _ROMANIZED_INDIC_CUES:
-            n += 1
-    return n
+        for key in _cue_lookup_keys(core):
+            lang = _ROMANIZED_INDIC_CUE_LANG.get(key)
+            if lang:
+                hits.append((key, lang))
+                break
+    return hits
+
+
+def romanized_indic_cue_count(text: str) -> int:
+    return len(_romanized_indic_cue_hits(text))
+
+
+def unique_romanized_cue_language(text: str) -> str | None:
+    langs = {lang for _, lang in _romanized_indic_cue_hits(text)}
+    if len(langs) == 1:
+        return langs.pop()
+    return None
+
+
+def latin_residual_without_preserved_english(text: str) -> str:
+    """Latin tokens that IndicXlit would actually transliterate.
+
+    Word-level EN–TE LID (Gundapu et al., arXiv:2010.04482) motivates
+    stripping English tokens before a sentence-level LID decision.
+    """
+    from src.transliteration import ROMAN_WORD_RE, should_preserve_roman
+
+    kept: list[str] = []
+    for token in _LATIN_SPLIT_RE.sub(" ", text).split():
+        match = ROMAN_WORD_RE.fullmatch(token)
+        if not match:
+            continue
+        core = match.group(2)
+        if should_preserve_roman(core) or len(core) <= 1:
+            continue
+        kept.append(core)
+    return " ".join(kept)
 
 
 def _indic_alternative_from_ftr(ranked: list[tuple[str, float]], text: str) -> str | None:
@@ -222,6 +280,31 @@ class RomanLanguageDetector:
             predict_label, config.INFERENCE_HARD_TIMEOUT_S
         )
 
+    def _rescue_romanized_indic(
+        self, text: str, ranked: list[tuple[str, float]]
+    ) -> str | None:
+        """Secondary check used only after sentence-level LID said English."""
+        alternate = _indic_alternative_from_ftr(ranked, text)
+        if alternate:
+            return alternate
+        if romanized_indic_cue_count(text) < 1:
+            return None
+        residual = latin_residual_without_preserved_english(text)
+        if not residual.strip():
+            return None
+        residual_ranked = self._ftr_topk(residual)
+        if not residual_ranked:
+            return None
+        rlabel, rscore = residual_ranked[0]
+        if rscore < FTR_RESIDUAL_INDIC_MIN_SCORE or rlabel == "eng_Latn":
+            return None
+        cue_lang = unique_romanized_cue_language(text)
+        mapped = LABEL_TO_LANG.get(rlabel)
+        if mapped and mapped != "en":
+            return cue_lang or mapped
+        # Unmapped roman classes (ori/snd/mni/…) still mean "not English".
+        return cue_lang
+
     def detect(self, text: str) -> str | None:
         """Best-effort language for Latin-script `text`. None means "couldn't
         improve on the existing guess" — caller keeps what it already had."""
@@ -230,34 +313,37 @@ class RomanLanguageDetector:
         try:
             ranked = self._ftr_topk(text)
             ftr_result = ranked[0] if ranked else None
+            cues = romanized_indic_cue_count(text)
+            residual_tokens = latin_residual_without_preserved_english(text).split()
+            short_no_cue = cues == 0 and len(residual_tokens) <= 4
             confident_ftr_label = None
             if ftr_result is not None:
                 label, score = ftr_result
                 if score >= FTR_CONFIDENCE_THRESHOLD:
                     confident_ftr_label = label
-                    # IndicLID-FTR can be confidently wrong by calling
-                    # romanized Indic text English. Let BERT adjudicate that
-                    # boundary; retain the fast path for confident Indic labels.
-                    if label != "eng_Latn":
-                        mapped = LABEL_TO_LANG.get(label)
-                        if mapped is not None:
-                            return mapped
+                    mapped = LABEL_TO_LANG.get(label)
+                    # Short Latin with no romanized cues is usually English;
+                    # FTR/BERT often assign a random Indic class (pa/bn/gu).
+                    if mapped and mapped != "en" and not short_no_cue:
+                        return unique_romanized_cue_language(text) or mapped
             bert_label = self._bert_predict(text)
             if bert_label is not None:
                 mapped = LABEL_TO_LANG.get(bert_label)
-                if mapped and mapped != "en":
-                    return mapped
-                if mapped == "en":
-                    alternate = _indic_alternative_from_ftr(ranked, text)
-                    return alternate or "en"
+                if mapped and mapped != "en" and not short_no_cue:
+                    return unique_romanized_cue_language(text) or mapped
+                if mapped == "en" or short_no_cue:
+                    return self._rescue_romanized_indic(text, ranked) or "en"
             if confident_ftr_label is not None:
                 mapped = LABEL_TO_LANG.get(confident_ftr_label)
-                if mapped == "en":
-                    alternate = _indic_alternative_from_ftr(ranked, text)
-                    return alternate or "en"
+                if mapped == "en" or mapped is None:
+                    rescued = self._rescue_romanized_indic(text, ranked)
+                    if rescued:
+                        return rescued
+                    return "en" if mapped == "en" else rescued
+                if short_no_cue:
+                    return "en"
                 return mapped
-            alternate = _indic_alternative_from_ftr(ranked, text)
-            return alternate
+            return self._rescue_romanized_indic(text, ranked)
         except Exception as exc:
             logger.warning("Roman LID failed for text: %s", exc)
             return None

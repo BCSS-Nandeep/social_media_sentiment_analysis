@@ -232,6 +232,84 @@ class RomanizedIndicLidAdjudicationTests(unittest.TestCase):
         lang = detector.detect("Loved the new update. Super smooth and fast.")
         self.assertEqual("en", lang)
 
+    def test_english_heavy_tenglish_rescued_via_residual_ftr(self):
+        from src.lid_roman import RomanLanguageDetector
+
+        class FakeFtr:
+            def predict(self, text, k=1):
+                lowered = text.casefold()
+                if "good" in lowered:
+                    labels = ["__label__eng_Latn", "__label__asm_Latn"]
+                    scores = [0.998, 0.001]
+                else:
+                    labels = ["__label__tel_Latn", "__label__eng_Latn"]
+                    scores = [1.0, 0.0]
+                return labels[:k], scores[:k]
+
+        detector = RomanLanguageDetector.__new__(RomanLanguageDetector)
+        detector.ftr = FakeFtr()
+        detector.bert = object()
+        detector.tokenizer = object()
+        detector.device = None
+        detector._bert_predict = lambda text: "eng_Latn"
+        lang = detector.detect(
+            "Trailer chala mass ga undi. Waiting for theatrical. Good move."
+        )
+        self.assertEqual("te", lang)
+
+    def test_short_english_bert_indic_hallucination_stays_english(self):
+        from src.lid_roman import RomanLanguageDetector
+
+        class FakeFtr:
+            def predict(self, text, k=1):
+                return (
+                    ["__label__eng_Latn", "__label__pan_Latn"][:k],
+                    [0.95, 0.03][:k],
+                )
+
+        detector = RomanLanguageDetector.__new__(RomanLanguageDetector)
+        detector.ftr = FakeFtr()
+        detector.bert = object()
+        detector.tokenizer = object()
+        detector.device = None
+        detector._bert_predict = lambda text: "pan_Latn"
+        self.assertEqual("en", detector.detect("good move"))
+
+    def test_short_english_confident_ftr_indic_stays_english_without_cues(self):
+        from src.lid_roman import RomanLanguageDetector
+
+        class FakeFtr:
+            def predict(self, text, k=1):
+                return (
+                    ["__label__ben_Latn", "__label__eng_Latn"][:k],
+                    [0.97, 0.02][:k],
+                )
+
+        detector = RomanLanguageDetector.__new__(RomanLanguageDetector)
+        detector.ftr = FakeFtr()
+        detector.bert = object()
+        detector.tokenizer = object()
+        detector.device = None
+        detector._bert_predict = lambda text: "ben_Latn"
+        self.assertEqual("en", detector.detect("nice work"))
+
+    def test_unique_cue_language_overrides_confused_dravidian_ftr(self):
+        from src.lid_roman import RomanLanguageDetector
+
+        class FakeFtr:
+            def predict(self, text, k=1):
+                return (
+                    ["__label__kan_Latn", "__label__eng_Latn"][:k],
+                    [0.91, 0.05][:k],
+                )
+
+        detector = RomanLanguageDetector.__new__(RomanLanguageDetector)
+        detector.ftr = FakeFtr()
+        detector.bert = None
+        detector.tokenizer = None
+        detector.device = None
+        self.assertEqual("te", detector.detect("nice kada"))
+
 
 class TraceabilityAndFallbackMetadataTests(unittest.TestCase):
     def test_pipeline_result_exposes_additive_trace_fields(self):
