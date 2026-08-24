@@ -1,0 +1,1267 @@
+{
+  "collected_at": "2026-08-24T17:16:00+05:30",
+  "notes": "Synthetic but realistic social-media edge cases for every DETECTOR_LANGUAGES code. Used for pre-deploy smoke (clean/LID/script/limits/xlit-preserve). Not live scraped tweet bodies. Viral corpus remains in predeploy_viral_posts.json.",
+  "edge_case_families": [
+    "native_positive",
+    "native_negative",
+    "emoji_hashtag",
+    "url_mention",
+    "short_sparse",
+    "mixed_script",
+    "romanized_code_mix",
+    "sarcasm",
+    "long_share",
+    "acronym_english_preserve"
+  ],
+  "posts": [
+    {
+      "id": "en-native_positive",
+      "lang_target": "en",
+      "edge_case": "native_positive",
+      "expected_lang": [
+        "en"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "Loved the new update. Super smooth and fast. Great job team!"
+    },
+    {
+      "id": "en-native_negative",
+      "lang_target": "en",
+      "edge_case": "native_negative",
+      "expected_lang": [
+        "en"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "App keeps crashing after login. Worst experience this week. Fix it now."
+    },
+    {
+      "id": "en-emoji_hashtag",
+      "lang_target": "en",
+      "edge_case": "emoji_hashtag",
+      "expected_lang": [
+        "en"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "#IndiaWins tonight was unreal 🔥🔥 What a finish!"
+    },
+    {
+      "id": "en-url_mention",
+      "lang_target": "en",
+      "edge_case": "url_mention",
+      "expected_lang": [
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "@support please check https://example.com/bug report again"
+    },
+    {
+      "id": "en-short_sparse",
+      "lang_target": "en",
+      "edge_case": "short_sparse",
+      "expected_lang": [
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin",
+        "unknown"
+      ],
+      "post_text": "#Delhi #Traffic"
+    },
+    {
+      "id": "en-sarcasm",
+      "lang_target": "en",
+      "edge_case": "sarcasm",
+      "expected_lang": [
+        "en"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "Power cuts only 12 hours a day. Outstanding work really 🙄"
+    },
+    {
+      "id": "en-long_share",
+      "lang_target": "en",
+      "edge_case": "long_share",
+      "expected_lang": [
+        "en"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "Match report thread: India started slowly, rebuilt through partnerships, and closed with a late flourish. Fans online called it clinical. Critics said fielding still needs work. Either way the scoreboard does not lie and the highlight clips will run all week. History. Respect. 🙏"
+    },
+    {
+      "id": "en-acronym_english_preserve",
+      "lang_target": "en",
+      "edge_case": "acronym_english_preserve",
+      "expected_lang": [
+        "en"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "BCCI and ICC both praised the knock. Good move by the selectors."
+    },
+    {
+      "id": "hi-native_positive",
+      "lang_target": "hi",
+      "edge_case": "native_positive",
+      "expected_lang": [
+        "hi"
+      ],
+      "expected_script": [
+        "devanagari"
+      ],
+      "post_text": "आज का मैच शानदार रहा। टीम ने कमाल कर दिया! 👏"
+    },
+    {
+      "id": "hi-native_negative",
+      "lang_target": "hi",
+      "edge_case": "native_negative",
+      "expected_lang": [
+        "hi"
+      ],
+      "expected_script": [
+        "devanagari"
+      ],
+      "post_text": "सेवा बहुत खराब है। घंटों से कोई जवाब नहीं आ रहा। बेकार अनुभव।"
+    },
+    {
+      "id": "hi-emoji_hashtag",
+      "lang_target": "hi",
+      "edge_case": "emoji_hashtag",
+      "expected_lang": [
+        "hi",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "devanagari",
+        "latin"
+      ],
+      "post_text": "#महंगाई फिर बढ़ गई 😡 जनता परेशान है"
+    },
+    {
+      "id": "hi-url_mention",
+      "lang_target": "hi",
+      "edge_case": "url_mention",
+      "expected_lang": [
+        "hi",
+        "unknown"
+      ],
+      "expected_script": [
+        "devanagari",
+        "latin"
+      ],
+      "post_text": "@news यह खबर सही है क्या? कृपया जाँच करें https://example.com/hi-news"
+    },
+    {
+      "id": "hi-short_sparse",
+      "lang_target": "hi",
+      "edge_case": "short_sparse",
+      "expected_lang": [
+        "hi",
+        "mr",
+        "unknown"
+      ],
+      "expected_script": [
+        "devanagari",
+        "unknown"
+      ],
+      "post_text": "#दिल्ली"
+    },
+    {
+      "id": "hi-mixed_script",
+      "lang_target": "hi",
+      "edge_case": "mixed_script",
+      "expected_lang": [
+        "hi",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "devanagari",
+        "latin"
+      ],
+      "post_text": "Good scheme लेकिन लागू नहीं हुआ। जनता नाराज है।"
+    },
+    {
+      "id": "hi-romanized_code_mix",
+      "lang_target": "hi",
+      "edge_case": "romanized_code_mix",
+      "expected_lang": [
+        "en",
+        "hi",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "Yeh service bilkul bakwas hai. Kabhi mat use karna."
+    },
+    {
+      "id": "hi-sarcasm",
+      "lang_target": "hi",
+      "edge_case": "sarcasm",
+      "expected_lang": [
+        "hi",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "devanagari",
+        "latin"
+      ],
+      "post_text": "वाह क्या व्यवस्था है! घंटों लाइन में खड़े रहो। बहुत बढ़िया 🙄"
+    },
+    {
+      "id": "te-native_positive",
+      "lang_target": "te",
+      "edge_case": "native_positive",
+      "expected_lang": [
+        "te"
+      ],
+      "expected_script": [
+        "telugu"
+      ],
+      "post_text": "ఈ సినిమా చాలా బాగుంది. మళ్లీ చూడాలని ఉంది!"
+    },
+    {
+      "id": "te-native_negative",
+      "lang_target": "te",
+      "edge_case": "native_negative",
+      "expected_lang": [
+        "te"
+      ],
+      "expected_script": [
+        "telugu"
+      ],
+      "post_text": "సేవ చాలా బాగోలేదు. ఎవరూ స్పందించడం లేదు. చాలా చెడ్డ అనుభవం."
+    },
+    {
+      "id": "te-emoji_hashtag",
+      "lang_target": "te",
+      "edge_case": "emoji_hashtag",
+      "expected_lang": [
+        "te",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "telugu",
+        "latin"
+      ],
+      "post_text": "#Mahakali ట్రైలర్ ఫైర్ 🔥🔥 మాస్ అప్డేట్"
+    },
+    {
+      "id": "te-mixed_script",
+      "lang_target": "te",
+      "edge_case": "mixed_script",
+      "expected_lang": [
+        "te",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin",
+        "telugu"
+      ],
+      "post_text": "సినిమా బాగుంది Good movie కానీ ending confuse చేసింది చాలా."
+    },
+    {
+      "id": "te-romanized_code_mix",
+      "lang_target": "te",
+      "edge_case": "romanized_code_mix",
+      "expected_lang": [
+        "en",
+        "te",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "Trailer chala mass ga undi. Waiting for theatrical. Good move."
+    },
+    {
+      "id": "te-url_mention",
+      "lang_target": "te",
+      "edge_case": "url_mention",
+      "expected_lang": [
+        "te",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin",
+        "telugu"
+      ],
+      "post_text": "@cineworld ఈ లింక్ చూడండి దయచేసి సమాధానం ఇవ్వండి https://example.com/te-trailer"
+    },
+    {
+      "id": "te-short_sparse",
+      "lang_target": "te",
+      "edge_case": "short_sparse",
+      "expected_lang": [
+        "te",
+        "unknown"
+      ],
+      "expected_script": [
+        "telugu",
+        "unknown"
+      ],
+      "post_text": "#హైదరాబాద్"
+    },
+    {
+      "id": "te-sarcasm",
+      "lang_target": "te",
+      "edge_case": "sarcasm",
+      "expected_lang": [
+        "te",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "telugu",
+        "latin"
+      ],
+      "post_text": "అద్భుతం! రోడ్డు మరమ్మతు ఇంకా మొదలు కాలేదు 🙄"
+    },
+    {
+      "id": "ta-native_positive",
+      "lang_target": "ta",
+      "edge_case": "native_positive",
+      "expected_lang": [
+        "ta"
+      ],
+      "expected_script": [
+        "tamil"
+      ],
+      "post_text": "இந்த படம் ரொம்ப அருமை. மீண்டும் பார்க்க ஆசை!"
+    },
+    {
+      "id": "ta-native_negative",
+      "lang_target": "ta",
+      "edge_case": "native_negative",
+      "expected_lang": [
+        "ta"
+      ],
+      "expected_script": [
+        "tamil"
+      ],
+      "post_text": "சேவை மிக மோசம். யாரும் பதில் சொல்லவில்லை. மோசமான அனுபவம்."
+    },
+    {
+      "id": "ta-emoji_hashtag",
+      "lang_target": "ta",
+      "edge_case": "emoji_hashtag",
+      "expected_lang": [
+        "ta",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "tamil",
+        "latin"
+      ],
+      "post_text": "#சென்னை போக்குவரத்து இன்று மோசம் 😡"
+    },
+    {
+      "id": "ta-mixed_script",
+      "lang_target": "ta",
+      "edge_case": "mixed_script",
+      "expected_lang": [
+        "ta",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin",
+        "tamil"
+      ],
+      "post_text": "Good update ஆனா bug இன்னும் இருக்கே."
+    },
+    {
+      "id": "ta-romanized_code_mix",
+      "lang_target": "ta",
+      "edge_case": "romanized_code_mix",
+      "expected_lang": [
+        "en",
+        "ta",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "Intha app romba slow ah irukku. Dont buy."
+    },
+    {
+      "id": "ta-url_mention",
+      "lang_target": "ta",
+      "edge_case": "url_mention",
+      "expected_lang": [
+        "ta",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin",
+        "tamil"
+      ],
+      "post_text": "@help இந்த இணைப்பை பாருங்கள் தயவுசெய்து உதவுங்கள் https://example.com/ta-help"
+    },
+    {
+      "id": "ta-short_sparse",
+      "lang_target": "ta",
+      "edge_case": "short_sparse",
+      "expected_lang": [
+        "ta",
+        "unknown"
+      ],
+      "expected_script": [
+        "tamil",
+        "unknown"
+      ],
+      "post_text": "#சென்னை"
+    },
+    {
+      "id": "ta-sarcasm",
+      "lang_target": "ta",
+      "edge_case": "sarcasm",
+      "expected_lang": [
+        "ta",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "tamil",
+        "latin"
+      ],
+      "post_text": "சூப்பர்! மழை வந்தாலே வெள்ளம். அற்புதமான திட்டம் 🙄"
+    },
+    {
+      "id": "kn-native_positive",
+      "lang_target": "kn",
+      "edge_case": "native_positive",
+      "expected_lang": [
+        "kn",
+        "unknown"
+      ],
+      "expected_script": [
+        "kannada"
+      ],
+      "post_text": "ಈ ಸಿನಿಮಾ ತುಂಬಾ ಚೆನ್ನಾಗಿದೆ. ಮತ್ತೆ ನೋಡಬೇಕು!"
+    },
+    {
+      "id": "kn-native_negative",
+      "lang_target": "kn",
+      "edge_case": "native_negative",
+      "expected_lang": [
+        "kn",
+        "unknown"
+      ],
+      "expected_script": [
+        "kannada"
+      ],
+      "post_text": "ಸೇವೆ ತುಂಬಾ ಕೆಟ್ಟದು. ಯಾರೂ ಪ್ರತಿಕ್ರಿಯಿಸುತ್ತಿಲ್ಲ. ಕೆಟ್ಟ ಅನುಭವ."
+    },
+    {
+      "id": "kn-emoji_hashtag",
+      "lang_target": "kn",
+      "edge_case": "emoji_hashtag",
+      "expected_lang": [
+        "kn",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "kannada",
+        "latin"
+      ],
+      "post_text": "#ಬೆಂಗಳೂರು traffic ಇಂದು ಕೆಟ್ಟಿದೆ 😡"
+    },
+    {
+      "id": "kn-mixed_script",
+      "lang_target": "kn",
+      "edge_case": "mixed_script",
+      "expected_lang": [
+        "kn",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "kannada",
+        "latin"
+      ],
+      "post_text": "Good app ಆದರೆ crash ಆಗುತ್ತಿದೆ."
+    },
+    {
+      "id": "kn-romanized_code_mix",
+      "lang_target": "kn",
+      "edge_case": "romanized_code_mix",
+      "expected_lang": [
+        "en",
+        "kn",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "Ee app thumba slow ide. Dont recommend."
+    },
+    {
+      "id": "kn-url_mention",
+      "lang_target": "kn",
+      "edge_case": "url_mention",
+      "expected_lang": [
+        "kn",
+        "unknown"
+      ],
+      "expected_script": [
+        "kannada",
+        "latin"
+      ],
+      "post_text": "@support ಈ ಲಿಂಕ್ ನೋಡಿ ದಯವಿಟ್ಟು ಸಹಾಯ ಮಾಡಿ https://example.com/kn-help"
+    },
+    {
+      "id": "kn-short_sparse",
+      "lang_target": "kn",
+      "edge_case": "short_sparse",
+      "expected_lang": [
+        "kn",
+        "unknown"
+      ],
+      "expected_script": [
+        "kannada",
+        "unknown"
+      ],
+      "post_text": "#ಬೆಂಗಳೂರು"
+    },
+    {
+      "id": "kn-sarcasm",
+      "lang_target": "kn",
+      "edge_case": "sarcasm",
+      "expected_lang": [
+        "kn",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "kannada",
+        "latin"
+      ],
+      "post_text": "ಅದ್ಭುತ! ಮಳೆ ಬಂದರೆ ರಸ್ತೆ ಮುಳುಗುತ್ತೆ 🙄"
+    },
+    {
+      "id": "ml-native_positive",
+      "lang_target": "ml",
+      "edge_case": "native_positive",
+      "expected_lang": [
+        "ml",
+        "unknown"
+      ],
+      "expected_script": [
+        "malayalam"
+      ],
+      "post_text": "ഈ സിനിമ വളരെ നല്ലതാണ്. വീണ്ടും കാണണം!"
+    },
+    {
+      "id": "ml-native_negative",
+      "lang_target": "ml",
+      "edge_case": "native_negative",
+      "expected_lang": [
+        "ml",
+        "unknown"
+      ],
+      "expected_script": [
+        "malayalam"
+      ],
+      "post_text": "സേവനം വളരെ മോശമാണ്. ആരും മറുപടി തരുന്നില്ല. മോശം അനുഭവം."
+    },
+    {
+      "id": "ml-emoji_hashtag",
+      "lang_target": "ml",
+      "edge_case": "emoji_hashtag",
+      "expected_lang": [
+        "ml",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "malayalam",
+        "latin"
+      ],
+      "post_text": "#കൊച്ചി മഴയിൽ വെള്ളക്കെട്ട് 😡"
+    },
+    {
+      "id": "ml-mixed_script",
+      "lang_target": "ml",
+      "edge_case": "mixed_script",
+      "expected_lang": [
+        "ml",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin",
+        "malayalam"
+      ],
+      "post_text": "സിനിമ നല്ലതാണ് Good film പക്ഷേ ending confuse ആയി വളരെ."
+    },
+    {
+      "id": "ml-romanized_code_mix",
+      "lang_target": "ml",
+      "edge_case": "romanized_code_mix",
+      "expected_lang": [
+        "en",
+        "ml",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "Ee app valare slow aanu. Dont buy."
+    },
+    {
+      "id": "ml-url_mention",
+      "lang_target": "ml",
+      "edge_case": "url_mention",
+      "expected_lang": [
+        "ml",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin",
+        "malayalam"
+      ],
+      "post_text": "@help ഈ ലിങ്ക് നോക്കൂ ദയവായി സഹായിക്കൂ https://example.com/ml-help"
+    },
+    {
+      "id": "ml-short_sparse",
+      "lang_target": "ml",
+      "edge_case": "short_sparse",
+      "expected_lang": [
+        "ml",
+        "unknown"
+      ],
+      "expected_script": [
+        "malayalam",
+        "unknown"
+      ],
+      "post_text": "#കൊച്ചി"
+    },
+    {
+      "id": "ml-sarcasm",
+      "lang_target": "ml",
+      "edge_case": "sarcasm",
+      "expected_lang": [
+        "ml",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "malayalam",
+        "latin"
+      ],
+      "post_text": "അടിപൊളി! മഴ വന്നാൽ റോഡ് മുങ്ങും 🙄"
+    },
+    {
+      "id": "mr-native_positive",
+      "lang_target": "mr",
+      "edge_case": "native_positive",
+      "expected_lang": [
+        "mr",
+        "hi"
+      ],
+      "expected_script": [
+        "devanagari"
+      ],
+      "post_text": "आजचा सामना खूप छान झाला. संघाने कमाल केली!"
+    },
+    {
+      "id": "mr-native_negative",
+      "lang_target": "mr",
+      "edge_case": "native_negative",
+      "expected_lang": [
+        "mr",
+        "hi"
+      ],
+      "expected_script": [
+        "devanagari"
+      ],
+      "post_text": "सेवा खूप वाईट आहे. कोणी उत्तर देत नाही. वाईट अनुभव."
+    },
+    {
+      "id": "mr-emoji_hashtag",
+      "lang_target": "mr",
+      "edge_case": "emoji_hashtag",
+      "expected_lang": [
+        "mr",
+        "hi",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "devanagari",
+        "latin"
+      ],
+      "post_text": "#मुंबई पाऊस आणि ट्रॅफिक 😡"
+    },
+    {
+      "id": "mr-mixed_script",
+      "lang_target": "mr",
+      "edge_case": "mixed_script",
+      "expected_lang": [
+        "mr",
+        "hi",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "devanagari",
+        "latin"
+      ],
+      "post_text": "Good scheme पण अंमलबजावणी नाही."
+    },
+    {
+      "id": "mr-romanized_code_mix",
+      "lang_target": "mr",
+      "edge_case": "romanized_code_mix",
+      "expected_lang": [
+        "en",
+        "mr",
+        "hi",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "Hi service khup kharab aahe. Use naka."
+    },
+    {
+      "id": "mr-url_mention",
+      "lang_target": "mr",
+      "edge_case": "url_mention",
+      "expected_lang": [
+        "mr",
+        "hi",
+        "unknown"
+      ],
+      "expected_script": [
+        "devanagari",
+        "latin"
+      ],
+      "post_text": "@news ही लिंक पाहा कृपया उत्तर द्या https://example.com/mr-news"
+    },
+    {
+      "id": "mr-short_sparse",
+      "lang_target": "mr",
+      "edge_case": "short_sparse",
+      "expected_lang": [
+        "mr",
+        "hi",
+        "unknown"
+      ],
+      "expected_script": [
+        "devanagari",
+        "unknown"
+      ],
+      "post_text": "#पुणे"
+    },
+    {
+      "id": "mr-sarcasm",
+      "lang_target": "mr",
+      "edge_case": "sarcasm",
+      "expected_lang": [
+        "mr",
+        "hi",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "devanagari",
+        "latin"
+      ],
+      "post_text": "वाह काय व्यवस्था आहे! तासनतास रांगेत उभे रहा 🙄"
+    },
+    {
+      "id": "bn-native_positive",
+      "lang_target": "bn",
+      "edge_case": "native_positive",
+      "expected_lang": [
+        "bn"
+      ],
+      "expected_script": [
+        "bengali"
+      ],
+      "post_text": "আজকের ম্যাচ দারুণ হয়েছে। দল অসাধারণ খেলেছে!"
+    },
+    {
+      "id": "bn-native_negative",
+      "lang_target": "bn",
+      "edge_case": "native_negative",
+      "expected_lang": [
+        "bn"
+      ],
+      "expected_script": [
+        "bengali"
+      ],
+      "post_text": "সার্ভিস খুব খারাপ। কেউ উত্তর দিচ্ছে না। খারাপ অভিজ্ঞতা।"
+    },
+    {
+      "id": "bn-emoji_hashtag",
+      "lang_target": "bn",
+      "edge_case": "emoji_hashtag",
+      "expected_lang": [
+        "bn",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "bengali",
+        "latin"
+      ],
+      "post_text": "#কলকাতা জলজট আবার 😡"
+    },
+    {
+      "id": "bn-mixed_script",
+      "lang_target": "bn",
+      "edge_case": "mixed_script",
+      "expected_lang": [
+        "bn",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "bengali",
+        "latin"
+      ],
+      "post_text": "আপডেট ভালো Good update কিন্তু bug এখনও আছে অনেক।"
+    },
+    {
+      "id": "bn-romanized_code_mix",
+      "lang_target": "bn",
+      "edge_case": "romanized_code_mix",
+      "expected_lang": [
+        "en",
+        "bn",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "Ei app khub slow. Dont recommend."
+    },
+    {
+      "id": "bn-url_mention",
+      "lang_target": "bn",
+      "edge_case": "url_mention",
+      "expected_lang": [
+        "bn",
+        "unknown"
+      ],
+      "expected_script": [
+        "bengali",
+        "latin"
+      ],
+      "post_text": "@help এই লিঙ্ক দেখুন দয়া করে সাহায্য করুন https://example.com/bn-help"
+    },
+    {
+      "id": "bn-short_sparse",
+      "lang_target": "bn",
+      "edge_case": "short_sparse",
+      "expected_lang": [
+        "bn",
+        "unknown"
+      ],
+      "expected_script": [
+        "bengali",
+        "unknown"
+      ],
+      "post_text": "#ঢাকা"
+    },
+    {
+      "id": "bn-sarcasm",
+      "lang_target": "bn",
+      "edge_case": "sarcasm",
+      "expected_lang": [
+        "bn",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "bengali",
+        "latin"
+      ],
+      "post_text": "বাহ চমৎকার ব্যবস্থা! ঘণ্টার পর ঘণ্টা লাইনে দাঁড়াও 🙄"
+    },
+    {
+      "id": "gu-native_positive",
+      "lang_target": "gu",
+      "edge_case": "native_positive",
+      "expected_lang": [
+        "gu"
+      ],
+      "expected_script": [
+        "gujarati"
+      ],
+      "post_text": "આજનો મેચ શાનદાર રહ્યો. ટીમે કમાલ કરી!"
+    },
+    {
+      "id": "gu-native_negative",
+      "lang_target": "gu",
+      "edge_case": "native_negative",
+      "expected_lang": [
+        "gu"
+      ],
+      "expected_script": [
+        "gujarati"
+      ],
+      "post_text": "સેવા ખૂબ ખરાબ છે. કોઈ જવાબ આપતું નથી. ખરાબ અનુભવ."
+    },
+    {
+      "id": "gu-emoji_hashtag",
+      "lang_target": "gu",
+      "edge_case": "emoji_hashtag",
+      "expected_lang": [
+        "gu",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "gujarati",
+        "latin"
+      ],
+      "post_text": "#અમદાવાદ ટ્રાફિક આજે ખરાબ 😡"
+    },
+    {
+      "id": "gu-mixed_script",
+      "lang_target": "gu",
+      "edge_case": "mixed_script",
+      "expected_lang": [
+        "gu",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "gujarati",
+        "latin"
+      ],
+      "post_text": "Good scheme પણ અમલ નથી થયો."
+    },
+    {
+      "id": "gu-romanized_code_mix",
+      "lang_target": "gu",
+      "edge_case": "romanized_code_mix",
+      "expected_lang": [
+        "en",
+        "gu",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "Aa service bilkul kharab chhe. Use nahi karvu."
+    },
+    {
+      "id": "gu-url_mention",
+      "lang_target": "gu",
+      "edge_case": "url_mention",
+      "expected_lang": [
+        "gu",
+        "unknown"
+      ],
+      "expected_script": [
+        "gujarati",
+        "latin"
+      ],
+      "post_text": "@news આ લિંક જુઓ કૃપા કરીને જવાબ આપો https://example.com/gu-news"
+    },
+    {
+      "id": "gu-short_sparse",
+      "lang_target": "gu",
+      "edge_case": "short_sparse",
+      "expected_lang": [
+        "gu",
+        "unknown"
+      ],
+      "expected_script": [
+        "gujarati",
+        "unknown"
+      ],
+      "post_text": "#સુરત"
+    },
+    {
+      "id": "gu-sarcasm",
+      "lang_target": "gu",
+      "edge_case": "sarcasm",
+      "expected_lang": [
+        "gu",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "gujarati",
+        "latin"
+      ],
+      "post_text": "વાહ શું વ્યવસ્થા છે! કલાકો લાઇનમાં ઊભા રહો 🙄"
+    },
+    {
+      "id": "pa-native_positive",
+      "lang_target": "pa",
+      "edge_case": "native_positive",
+      "expected_lang": [
+        "pa"
+      ],
+      "expected_script": [
+        "gurmukhi"
+      ],
+      "post_text": "ਅੱਜ ਦਾ ਮੈਚ ਬਹੁਤ ਵਧੀਆ ਰਿਹਾ। ਟੀਮ ਨੇ ਕਮਾਲ ਕਰ ਦਿੱਤੀ!"
+    },
+    {
+      "id": "pa-native_negative",
+      "lang_target": "pa",
+      "edge_case": "native_negative",
+      "expected_lang": [
+        "pa"
+      ],
+      "expected_script": [
+        "gurmukhi"
+      ],
+      "post_text": "ਸੇਵਾ ਬਹੁਤ ਖਰਾਬ ਹੈ। ਕੋਈ ਜਵਾਬ ਨਹੀਂ ਦੇ ਰਿਹਾ। ਖਰਾਬ ਤਜਰਬਾ।"
+    },
+    {
+      "id": "pa-emoji_hashtag",
+      "lang_target": "pa",
+      "edge_case": "emoji_hashtag",
+      "expected_lang": [
+        "pa",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "gurmukhi",
+        "latin"
+      ],
+      "post_text": "#ਚੰਡੀਗੜ੍ਹ ਟ੍ਰੈਫਿਕ ਅੱਜ ਖਰਾਬ 😡"
+    },
+    {
+      "id": "pa-mixed_script",
+      "lang_target": "pa",
+      "edge_case": "mixed_script",
+      "expected_lang": [
+        "pa",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "gurmukhi",
+        "latin"
+      ],
+      "post_text": "ਅਪਡੇਟ ਚੰਗਾ ਹੈ Good update ਪਰ bug ਅਜੇ ਵੀ ਹੈ ਬਹੁਤ।"
+    },
+    {
+      "id": "pa-romanized_code_mix",
+      "lang_target": "pa",
+      "edge_case": "romanized_code_mix",
+      "expected_lang": [
+        "en",
+        "pa",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "Eh service bilkul kharab hai. Use na karo."
+    },
+    {
+      "id": "pa-url_mention",
+      "lang_target": "pa",
+      "edge_case": "url_mention",
+      "expected_lang": [
+        "pa",
+        "unknown"
+      ],
+      "expected_script": [
+        "gurmukhi",
+        "latin"
+      ],
+      "post_text": "@help ਇਹ ਲਿੰਕ ਵੇਖੋ ਕਿਰਪਾ ਕਰਕੇ ਮਦਦ ਕਰੋ https://example.com/pa-help"
+    },
+    {
+      "id": "pa-short_sparse",
+      "lang_target": "pa",
+      "edge_case": "short_sparse",
+      "expected_lang": [
+        "pa",
+        "unknown"
+      ],
+      "expected_script": [
+        "gurmukhi",
+        "unknown"
+      ],
+      "post_text": "#ਅੰਮ੍ਰਿਤਸਰ"
+    },
+    {
+      "id": "pa-sarcasm",
+      "lang_target": "pa",
+      "edge_case": "sarcasm",
+      "expected_lang": [
+        "pa",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "gurmukhi",
+        "latin"
+      ],
+      "post_text": "ਵਾਹ ਕੀ ਇੰਤਜ਼ਾਮ ਹੈ! ਘੰਟਿਆਂ ਲਾਈਨ ਵਿੱਚ ਖੜ੍ਹੇ ਰਹੋ 🙄"
+    },
+    {
+      "id": "ur-native_positive",
+      "lang_target": "ur",
+      "edge_case": "native_positive",
+      "expected_lang": [
+        "ur"
+      ],
+      "expected_script": [
+        "perso_arabic"
+      ],
+      "post_text": "آج کا میچ زبردست رہا۔ ٹیم نے کمال کر دیا!"
+    },
+    {
+      "id": "ur-native_negative",
+      "lang_target": "ur",
+      "edge_case": "native_negative",
+      "expected_lang": [
+        "ur"
+      ],
+      "expected_script": [
+        "perso_arabic"
+      ],
+      "post_text": "سروس بہت خراب ہے۔ کوئی جواب نہیں دے رہا۔ برا تجربہ۔"
+    },
+    {
+      "id": "ur-emoji_hashtag",
+      "lang_target": "ur",
+      "edge_case": "emoji_hashtag",
+      "expected_lang": [
+        "ur",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "perso_arabic",
+        "latin"
+      ],
+      "post_text": "#کراچی ٹریفک آج خراب 😡"
+    },
+    {
+      "id": "ur-mixed_script",
+      "lang_target": "ur",
+      "edge_case": "mixed_script",
+      "expected_lang": [
+        "ur",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin",
+        "perso_arabic"
+      ],
+      "post_text": "Good update لیکن bug اب بھی موجود ہے۔"
+    },
+    {
+      "id": "ur-romanized_code_mix",
+      "lang_target": "ur",
+      "edge_case": "romanized_code_mix",
+      "expected_lang": [
+        "en",
+        "ur",
+        "hi",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "Yeh service bilkul kharab hai. Use mat karo."
+    },
+    {
+      "id": "ur-url_mention",
+      "lang_target": "ur",
+      "edge_case": "url_mention",
+      "expected_lang": [
+        "ur",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin",
+        "perso_arabic"
+      ],
+      "post_text": "@help یہ لنک دیکھیں براہ کرم مدد کریں https://example.com/ur-help"
+    },
+    {
+      "id": "ur-short_sparse",
+      "lang_target": "ur",
+      "edge_case": "short_sparse",
+      "expected_lang": [
+        "ur",
+        "unknown"
+      ],
+      "expected_script": [
+        "perso_arabic",
+        "unknown"
+      ],
+      "post_text": "#لاہور"
+    },
+    {
+      "id": "ur-sarcasm",
+      "lang_target": "ur",
+      "edge_case": "sarcasm",
+      "expected_lang": [
+        "ur",
+        "en",
+        "unknown"
+      ],
+      "expected_script": [
+        "perso_arabic",
+        "latin"
+      ],
+      "post_text": "واہ کیا انتظام ہے! گھنٹوں قطار میں کھڑے رہو 🙄"
+    },
+    {
+      "id": "xx-acronym_english_preserve",
+      "lang_target": "hi",
+      "edge_case": "acronym_english_preserve",
+      "expected_lang": [
+        "en",
+        "hi",
+        "unknown"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "BCCI selection was fair. Good move by the board after ICC feedback."
+    },
+    {
+      "id": "xx-review_sarcasm_flag",
+      "lang_target": "en",
+      "edge_case": "sarcasm",
+      "expected_lang": [
+        "en"
+      ],
+      "expected_script": [
+        "latin"
+      ],
+      "post_text": "Fantastic. Another outage during peak hours. Truly world class service."
+    }
+  ]
+}
