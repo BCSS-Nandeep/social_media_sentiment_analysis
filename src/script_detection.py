@@ -25,6 +25,19 @@ UNICODE_RANGES: dict[str, tuple[int, int]] = {
 
 LATIN_RANGE = (0x0041, 0x024F)  # basic Latin + Latin-1 + Latin Extended-A/B
 
+# Scripts that uniquely identify a supported FLORES language. Devanagari is
+# omitted because Hindi and Marathi share it.
+UNIQUE_SCRIPT_TO_LANG: dict[str, str] = {
+    "kannada": "kn",
+    "malayalam": "ml",
+    "tamil": "ta",
+    "telugu": "te",
+    "gurmukhi": "pa",
+    "gujarati": "gu",
+    "bengali": "bn",
+    "perso_arabic": "ur",
+}
+
 
 def _script_bucket(ch: str) -> str | None:
     """Map one character onto latin / an Indic block, including combining marks."""
@@ -79,3 +92,33 @@ def extract_latin_text(text: str) -> str:
 
 def is_latin_script(text: str) -> bool:
     return detect_script(text) == "latin"
+
+
+def unique_indic_language(text: str, min_share: float | None = None) -> str | None:
+    """Return a supported language when one unique Indic script is present.
+
+    Used when lingua cannot represent Kannada/Malayalam (no ISO 639-1 KN/ML
+    profiles) and when mixed-script posts are mislabelled English because the
+    Latin span dominates lingua. Devanagari is never mapped here.
+    """
+    import config
+
+    threshold = config.INTELLIGENCE_CODEMIX_RATIO if min_share is None else min_share
+    counts: Counter[str] = Counter()
+    for ch in text:
+        bucket = _script_bucket(ch)
+        if bucket is not None:
+            counts[bucket] += 1
+    if not counts:
+        return None
+    total = sum(counts.values())
+    indic = {
+        name: n for name, n in counts.items()
+        if name in UNIQUE_SCRIPT_TO_LANG
+    }
+    if not indic:
+        return None
+    script, n = max(indic.items(), key=lambda item: item[1])
+    if n / total < threshold:
+        return None
+    return UNIQUE_SCRIPT_TO_LANG[script]

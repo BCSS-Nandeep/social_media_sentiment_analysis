@@ -29,11 +29,20 @@ class LanguageDetector:
         try:
             from lingua import IsoCode639_1, LanguageDetectorBuilder
 
-            iso_codes = [
-                getattr(IsoCode639_1, code.upper())
-                for code in DETECTOR_LANGUAGES
-                if hasattr(IsoCode639_1, code.upper())
-            ]
+            iso_codes = []
+            skipped = []
+            for code in DETECTOR_LANGUAGES:
+                iso = getattr(IsoCode639_1, code.upper(), None)
+                if iso is None:
+                    skipped.append(code)
+                    continue
+                iso_codes.append(iso)
+            if skipped:
+                logger.warning(
+                    "lingua has no ISO 639-1 profiles for %s; native-script "
+                    "fallback in script_detection.unique_indic_language covers them.",
+                    ",".join(skipped),
+                )
             self._lingua = (
                 LanguageDetectorBuilder.from_iso_codes_639_1(*iso_codes)
                 .with_minimum_relative_distance(0.10)

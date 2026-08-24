@@ -12,9 +12,9 @@ from pathlib import Path
 
 import config
 from src.language_detector import LanguageDetector
-from src.pipeline import PipelineResult, annotate_result_quality
+from src.pipeline import PipelineResult, SentimentPipeline, annotate_result_quality
 from src.preprocessing import clean_text
-from src.script_detection import detect_script
+from src.script_detection import detect_script, unique_indic_language
 from src.transliteration import should_preserve_roman
 
 FIXTURE = Path(__file__).resolve().parents[1] / "data" / "predeploy_lang_edge_cases.json"
@@ -133,6 +133,38 @@ class PredeployLangEdgeCaseTests(unittest.TestCase):
                 continue
             with self.subTest(post["id"]):
                 self.assertNotEqual("latin", detect_script(post["post_text"]))
+
+    def test_kannada_malayalam_script_fallback_routes_to_supported_lang(self):
+        """lingua cannot load KN/ML; pipeline script fallback must still route."""
+        service = SentimentPipeline.__new__(SentimentPipeline)
+
+        class FakeRoman:
+            def detect(self, text):
+                return "en"
+
+        service.roman_detector = FakeRoman()
+        for post in self.posts:
+            if post["lang_target"] not in {"kn", "ml"}:
+                continue
+            if post["edge_case"] not in {
+                "native_positive", "native_negative", "mixed_script",
+            }:
+                continue
+            with self.subTest(post["id"]):
+                self.assertEqual(post["lang_target"], unique_indic_language(post["post_text"]))
+                refined = service._refine_latin_languages(
+                    [post["post_text"]],
+                    ["unknown" if post["edge_case"].startswith("native") else "en"],
+                )
+                self.assertEqual([post["lang_target"]], refined)
+
+    def test_short_tenglish_has_romanized_cues_english_does_not(self):
+        from src.lid_roman import romanized_indic_cue_count
+
+        tenglish = next(p for p in self.posts if p["id"] == "te-romanized_code_mix")
+        english = next(p for p in self.posts if p["id"] == "en-native_positive")
+        self.assertGreaterEqual(romanized_indic_cue_count(tenglish["post_text"]), 1)
+        self.assertEqual(0, romanized_indic_cue_count(english["post_text"]))
 
     def test_mixed_script_posts_contain_latin_and_indic(self):
         """Mixed posts must include both Latin and a native Indic block."""

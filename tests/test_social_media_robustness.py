@@ -85,13 +85,14 @@ class MixedScriptLanguageRefineTests(unittest.TestCase):
                 self.seen = text
                 return "te"
 
-        service.roman_detector = FakeRoman()
+        fake = FakeRoman()
+        service.roman_detector = fake
         languages = service._refine_latin_languages(
             ["Good scheme ప్రభుత్వం చాలా బాగుంది"],
             ["en"],
         )
         self.assertEqual(["te"], languages)
-        self.assertTrue(script_detection.is_latin_script(service.roman_detector.seen))
+        self.assertFalse(hasattr(fake, "seen"))
 
     def test_native_telugu_detection_is_not_overridden_by_english_loanword(self):
         service = pipeline.SentimentPipeline.__new__(pipeline.SentimentPipeline)
@@ -109,6 +110,127 @@ class MixedScriptLanguageRefineTests(unittest.TestCase):
             ["te"],
         )
         self.assertEqual(["te"], languages)
+
+
+class UniqueScriptLanguageFallbackTests(unittest.TestCase):
+    def test_native_kannada_and_malayalam_map_without_lingua(self):
+        self.assertEqual(
+            "kn",
+            script_detection.unique_indic_language(
+                "ಈ ಸಿನಿಮಾ ತುಂಬಾ ಚೆನ್ನಾಗಿದೆ. ಮತ್ತೆ ನೋಡಬೇಕು!"
+            ),
+        )
+        self.assertEqual(
+            "ml",
+            script_detection.unique_indic_language(
+                "ഈ സിനിമ വളരെ നല്ലതാണ്. വീണ്ടും കാണണം!"
+            ),
+        )
+
+    def test_mixed_kannada_english_is_kannada_not_latin(self):
+        text = "Good app ಆದರೆ crash ಆಗುತ್ತಿದೆ."
+        self.assertEqual("kn", script_detection.unique_indic_language(text))
+        self.assertFalse(script_detection.is_latin_script(text))
+
+    def test_genuine_english_has_no_unique_indic_script(self):
+        self.assertIsNone(
+            script_detection.unique_indic_language(
+                "Loved the new update. Super smooth and fast."
+            )
+        )
+
+    def test_devanagari_is_not_forced_to_a_single_language(self):
+        self.assertIsNone(
+            script_detection.unique_indic_language("आज का मैच शानदार रहा।")
+        )
+
+    def test_refine_recovers_unknown_kannada_and_malayalam(self):
+        service = pipeline.SentimentPipeline.__new__(pipeline.SentimentPipeline)
+
+        class FakeRoman:
+            def detect(self, text):
+                raise AssertionError("IndicLID must not run on native KN/ML")
+
+        service.roman_detector = FakeRoman()
+        languages = service._refine_latin_languages(
+            [
+                "ಈ ಸಿನಿಮಾ ತುಂಬಾ ಚೆನ್ನಾಗಿದೆ. ಮತ್ತೆ ನೋಡಬೇಕು!",
+                "ഈ സിനിമ വളരെ നല്ലതാണ്. വീണ്ടും കാണണം!",
+            ],
+            ["unknown", "unknown"],
+        )
+        self.assertEqual(["kn", "ml"], languages)
+
+    def test_refine_does_not_bypass_mixed_kannada_as_english(self):
+        service = pipeline.SentimentPipeline.__new__(pipeline.SentimentPipeline)
+
+        class FakeRoman:
+            def detect(self, text):
+                self.seen = text
+                return "en"
+
+        service.roman_detector = FakeRoman()
+        languages = service._refine_latin_languages(
+            ["Good app ಆದರೆ crash ಆಗುತ್ತಿದೆ."],
+            ["en"],
+        )
+        self.assertEqual(["kn"], languages)
+
+    def test_refine_leaves_genuine_english_for_indiclid(self):
+        service = pipeline.SentimentPipeline.__new__(pipeline.SentimentPipeline)
+
+        class FakeRoman:
+            def detect(self, text):
+                self.seen = text
+                return "en"
+
+        fake = FakeRoman()
+        service.roman_detector = fake
+        languages = service._refine_latin_languages(
+            ["Loved the new update. Super smooth and fast."],
+            ["en"],
+        )
+        self.assertEqual(["en"], languages)
+        self.assertTrue(hasattr(fake, "seen"))
+
+
+class RomanizedIndicLidAdjudicationTests(unittest.TestCase):
+    def test_short_tenglish_uses_ftr_indic_alternative_not_english(self):
+        from src.lid_roman import RomanLanguageDetector
+
+        class FakeFtr:
+            def predict(self, text, k=1):
+                labels = ["__label__eng_Latn", "__label__tel_Latn", "__label__tam_Latn"]
+                scores = [0.74, 0.21, 0.03]
+                return labels[:k], scores[:k]
+
+        detector = RomanLanguageDetector.__new__(RomanLanguageDetector)
+        detector.ftr = FakeFtr()
+        detector.bert = None
+        detector.tokenizer = None
+        detector.device = None
+        lang = detector.detect(
+            "Trailer chala mass ga undi. Waiting for theatrical. Good move."
+        )
+        self.assertEqual("te", lang)
+
+    def test_genuine_english_stays_english_even_if_ftr_has_weak_telugu(self):
+        from src.lid_roman import RomanLanguageDetector
+
+        class FakeFtr:
+            def predict(self, text, k=1):
+                return (
+                    ["__label__eng_Latn", "__label__tel_Latn"][:k],
+                    [0.81, 0.12][:k],
+                )
+
+        detector = RomanLanguageDetector.__new__(RomanLanguageDetector)
+        detector.ftr = FakeFtr()
+        detector.bert = None
+        detector.tokenizer = None
+        detector.device = None
+        lang = detector.detect("Loved the new update. Super smooth and fast.")
+        self.assertEqual("en", lang)
 
 
 class TraceabilityAndFallbackMetadataTests(unittest.TestCase):

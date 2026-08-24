@@ -30,7 +30,9 @@ transliteration: any failure or low confidence keeps the existing detector's
 guess rather than forcing a possibly-wrong override.
 
 Only used to REFINE the language for text that script_detection.py already
-flagged as Latin-script — native-script detection (lingua) is untouched.
+flagged as Latin-script — native-script Kannada/Malayalam (and other unique
+scripts) are recovered in pipeline._refine_latin_languages via
+unique_indic_language, because lingua has no KN/ML profiles.
 """
 from __future__ import annotations
 
@@ -53,6 +55,23 @@ BERT_MODEL_FILE = config.MODELS_DIR / "indiclid-bert" / "basline_nn_simple.pt"
 BERT_TOKENIZER = "ai4bharat/IndicBERTv2-MLM-only"
 
 FTR_CONFIDENCE_THRESHOLD = 0.6  # same default AI4Bharat's own IndicLID class uses
+# When FTR is confident English, still consider a lower-ranked Indic class if
+# the post also has romanized Indic function words (short Tenglish). From
+# IndicLID paper: accuracy collapses below ~10 words and FTR is often
+# confidently wrong on romanized vs English.
+FTR_ALTERNATE_INDIC_MIN_SCORE = 0.15
+FTR_TOPK = 3
+
+# High-precision romanized cues — not a general dictionary. English-looking
+# posts without these stay English even if FTR has a weak Telugu tail.
+_ROMANIZED_INDIC_CUES = frozenset(
+    {
+        "chala", "undi", "nenu", "chalu", "bagunna", "ayyindi", "unnadi",
+        "thumba", "romba", "irukku", "aanu", "aahe", "kharab", "bakwas",
+        "bilkul", "cheyandi", "ledu", "undhi", "unna", "emi", "enduku",
+        "ipudu", "inka", "kaani", "kada", "gaa", "ani",
+    }
+)
 
 # Both FTR and BERT share this label space (BERT's classifier head has
 # exactly 22 outputs: the *_Latn codes below + 'other' — verified by loading
@@ -68,6 +87,35 @@ LABEL_TO_LANG: dict[str, str] = {
     "mal_Latn": "ml", "mar_Latn": "mr", "pan_Latn": "pa", "tam_Latn": "ta",
     "tel_Latn": "te", "urd_Latn": "ur", "eng_Latn": "en",
 }
+
+
+def romanized_indic_cue_count(text: str) -> int:
+    from src.transliteration import ROMAN_WORD_RE, should_preserve_roman
+
+    n = 0
+    for token in text.replace(".", " ").split():
+        match = ROMAN_WORD_RE.fullmatch(token)
+        if not match:
+            continue
+        core = match.group(2).casefold()
+        if should_preserve_roman(match.group(2)):
+            continue
+        if core in _ROMANIZED_INDIC_CUES:
+            n += 1
+    return n
+
+
+def _indic_alternative_from_ftr(ranked: list[tuple[str, float]], text: str) -> str | None:
+    """Prefer a lower-ranked Indic FTR class only when romanized cues exist."""
+    if romanized_indic_cue_count(text) < 1:
+        return None
+    for label, score in ranked:
+        if label == "eng_Latn" or score < FTR_ALTERNATE_INDIC_MIN_SCORE:
+            continue
+        mapped = LABEL_TO_LANG.get(label)
+        if mapped and mapped != "en":
+            return mapped
+    return None
 
 
 def _download_zip(url: str, extract_to: Path) -> None:
@@ -141,11 +189,20 @@ class RomanLanguageDetector:
             self.bert = None
             self.tokenizer = None
 
-    def _ftr_predict(self, text: str) -> tuple[str, float] | None:
+    def _ftr_topk(self, text: str) -> list[tuple[str, float]]:
         if self.ftr is None:
+            return []
+        labels, scores = self.ftr.predict(text.replace("\n", " "), k=FTR_TOPK)
+        return [
+            (str(label).replace("__label__", ""), float(score))
+            for label, score in zip(labels, scores)
+        ]
+
+    def _ftr_predict(self, text: str) -> tuple[str, float] | None:
+        top = self._ftr_topk(text)
+        if not top:
             return None
-        labels, scores = self.ftr.predict(text.replace("\n", " "))
-        return labels[0].replace("__label__", ""), float(scores[0])
+        return top[0]
 
     def _bert_predict(self, text: str) -> str | None:
         import torch
@@ -171,7 +228,8 @@ class RomanLanguageDetector:
         if not text.strip():
             return None
         try:
-            ftr_result = self._ftr_predict(text)
+            ranked = self._ftr_topk(text)
+            ftr_result = ranked[0] if ranked else None
             confident_ftr_label = None
             if ftr_result is not None:
                 label, score = ftr_result
@@ -186,10 +244,20 @@ class RomanLanguageDetector:
                             return mapped
             bert_label = self._bert_predict(text)
             if bert_label is not None:
-                return LABEL_TO_LANG.get(bert_label)
+                mapped = LABEL_TO_LANG.get(bert_label)
+                if mapped and mapped != "en":
+                    return mapped
+                if mapped == "en":
+                    alternate = _indic_alternative_from_ftr(ranked, text)
+                    return alternate or "en"
             if confident_ftr_label is not None:
-                return LABEL_TO_LANG.get(confident_ftr_label)
-            return None
+                mapped = LABEL_TO_LANG.get(confident_ftr_label)
+                if mapped == "en":
+                    alternate = _indic_alternative_from_ftr(ranked, text)
+                    return alternate or "en"
+                return mapped
+            alternate = _indic_alternative_from_ftr(ranked, text)
+            return alternate
         except Exception as exc:
             logger.warning("Roman LID failed for text: %s", exc)
             return None

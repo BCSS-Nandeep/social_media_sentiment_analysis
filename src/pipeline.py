@@ -29,7 +29,12 @@ from src.inference import SentimentClassifier
 from src.language_detector import LanguageDetector
 from src.lid_roman import RomanLanguageDetector
 from src.preprocessing import clean_text
-from src.script_detection import extract_latin_text, is_latin_script, latin_letter_ratio
+from src.script_detection import (
+    extract_latin_text,
+    is_latin_script,
+    latin_letter_ratio,
+    unique_indic_language,
+)
 from src.transliteration import Transliterator
 from src.translation import (
     TranslationError,
@@ -212,9 +217,15 @@ class SentimentPipeline:
         English/unknown despite a substantial Latin span.
         Native-script detections (te/hi/…) are left alone so a single English
         loanword cannot flip the post to English.
+        Unique Indic scripts (Kannada, Malayalam, …) override lingua
+        ``en``/``unknown`` because lingua has no KN/ML profiles.
         """
         refined = list(languages)
         for i, (text, lang) in enumerate(zip(cleaned, languages)):
+            script_lang = unique_indic_language(text)
+            if script_lang is not None and lang in {"en", "unknown"}:
+                refined[i] = script_lang
+                continue
             probe = None
             if is_latin_script(text):
                 probe = text
