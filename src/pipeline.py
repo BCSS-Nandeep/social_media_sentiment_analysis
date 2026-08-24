@@ -21,6 +21,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass
 
+import numpy as np
 import torch
 
 import config
@@ -28,7 +29,7 @@ from src.inference import SentimentClassifier
 from src.language_detector import LanguageDetector
 from src.lid_roman import RomanLanguageDetector
 from src.preprocessing import clean_text
-from src.script_detection import is_latin_script
+from src.script_detection import extract_latin_text, is_latin_script, latin_letter_ratio
 from src.transliteration import Transliterator
 from src.translation import (
     TranslationError,
@@ -60,6 +61,15 @@ class PipelineResult:
     translation_time_ms: float
     sentiment_time_ms: float
     total_time_ms: float
+    cleaned_text: str = ""
+    transliterated_text: str = ""
+    translation_backend: str = "unknown"
+    fallback_used: bool = False
+    fallback_reason: str = ""
+    translation_truncated: bool = False
+    sentiment_truncated: bool = False
+    low_confidence: bool = False
+    review_recommended: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -98,6 +108,27 @@ def _raise_if_fatal_model_error(exc: Exception) -> None:
         for marker in ("out of memory", "cuda error", "device-side assert")
     ):
         raise exc
+
+
+def annotate_result_quality(result: PipelineResult) -> PipelineResult:
+    """Attach review flags without changing the sentiment label.
+
+    The low-confidence cutoff is the existing intelligence threshold
+    (INTELLIGENCE_LOW_CONFIDENCE), not a newly invented number. Flags are
+    additive metadata for operators; they never rewrite ``sentiment``.
+    """
+    low = float(result.confidence) < config.INTELLIGENCE_LOW_CONFIDENCE
+    review = (
+        low
+        or result.language in {"unknown", ""}
+        or (result.language != "en" and not result.was_translated)
+        or result.fallback_used
+        or result.translation_truncated
+        or result.sentiment_truncated
+    )
+    result.low_confidence = low
+    result.review_recommended = review
+    return result
 
 
 class SentimentPipeline:
@@ -177,14 +208,28 @@ class SentimentPipeline:
         profiles, so Latin-script text almost always comes back as 'en' even
         when it's Hinglish/Roman-Telugu/etc. IndicLID-FTR is purpose-trained
         for exactly this distinction — use it to override the language for
-        Latin-script text only; native-script detection is untouched."""
+        Latin-script text, and for mixed-script posts that lingua called
+        English/unknown despite a substantial Latin span.
+        Native-script detections (te/hi/…) are left alone so a single English
+        loanword cannot flip the post to English.
+        """
         refined = list(languages)
         for i, (text, lang) in enumerate(zip(cleaned, languages)):
-            if not is_latin_script(text):
+            probe = None
+            if is_latin_script(text):
+                probe = text
+            elif lang in {"en", "unknown"} and latin_letter_ratio(
+                text
+            ) >= config.INTELLIGENCE_CODEMIX_RATIO:
+                probe = extract_latin_text(text)
+            if not probe or not probe.strip():
                 continue
-            better = self.roman_detector.detect(text)
-            if better is not None:
-                refined[i] = better
+            better = self.roman_detector.detect(probe)
+            if better is None:
+                continue
+            if lang not in {"en", "unknown"} and better == "en":
+                continue
+            refined[i] = better
         return refined
 
     def _transliterate_batch(self, cleaned: list[str], languages: list[str]) -> tuple[list[str], list[bool]]:
@@ -273,10 +318,27 @@ class SentimentPipeline:
         merged_texts = list(primary.texts)
         merged_times = primary.times_ms.copy()
         merged_mask = primary.translated_mask.copy()
+        merged_backends = list(
+            primary.backends or ["unknown"] * len(primary.texts)
+        )
+        merged_truncated = (
+            primary.truncated_mask.copy()
+            if primary.truncated_mask is not None
+            else np.zeros(len(primary.texts), dtype=bool)
+        )
+        fallback_backends = fallback.backends or [FALLBACK_TRANSLATION_KEY] * len(
+            retry_indices
+        )
+        fallback_truncated = fallback.truncated_mask
         for fallback_idx, original_idx in enumerate(retry_indices):
             merged_texts[original_idx] = fallback.texts[fallback_idx]
             merged_times[original_idx] += fallback.times_ms[fallback_idx]
             merged_mask[original_idx] = fallback.translated_mask[fallback_idx]
+            merged_backends[original_idx] = fallback_backends[fallback_idx]
+            if fallback_truncated is not None:
+                merged_truncated[original_idx] = bool(
+                    fallback_truncated[fallback_idx]
+                )
         return TranslationResult(
             texts=merged_texts,
             times_ms=merged_times,
@@ -284,6 +346,8 @@ class SentimentPipeline:
             gpu_peak_mb=max(primary.gpu_peak_mb, fallback.gpu_peak_mb),
             translated_mask=merged_mask,
             n_cached=primary.n_cached + fallback.n_cached,
+            backends=merged_backends,
+            truncated_mask=merged_truncated,
         )
 
     @staticmethod
@@ -552,23 +616,51 @@ class SentimentPipeline:
             sorted(set(languages)),
         )
 
+        backends = translation.backends or ["unknown"] * len(texts)
+        truncated = (
+            translation.truncated_mask
+            if translation.truncated_mask is not None
+            else np.zeros(len(texts), dtype=bool)
+        )
         return [
-            PipelineResult(
-                post_text=texts[i],
-                language=languages[i],
-                english_text=translation.texts[i],
-                was_translated=bool(translation.translated_mask[i]),
-                was_transliterated=was_transliterated[i],
-                sentiment=sentiment.labels[i],
-                confidence=round(float(sentiment.confidences[i]), 4),
-                translation_time_ms=round(float(translation.times_ms[i]), 3),
-                sentiment_time_ms=round(float(sentiment.times_ms[i]), 3),
-                total_time_ms=round(
-                    float(translation.times_ms[i] + sentiment.times_ms[i]), 3
-                ),
+            annotate_result_quality(
+                PipelineResult(
+                    post_text=texts[i],
+                    language=languages[i],
+                    english_text=translation.texts[i],
+                    was_translated=bool(translation.translated_mask[i]),
+                    was_transliterated=was_transliterated[i],
+                    sentiment=sentiment.labels[i],
+                    confidence=round(float(sentiment.confidences[i]), 4),
+                    translation_time_ms=round(float(translation.times_ms[i]), 3),
+                    sentiment_time_ms=round(float(sentiment.times_ms[i]), 3),
+                    total_time_ms=round(
+                        float(translation.times_ms[i] + sentiment.times_ms[i]), 3
+                    ),
+                    cleaned_text=cleaned[i],
+                    transliterated_text=(
+                        working_texts[i] if was_transliterated[i] else ""
+                    ),
+                    translation_backend=backends[i],
+                    fallback_used=False,
+                    fallback_reason="",
+                    translation_truncated=bool(truncated[i]),
+                    sentiment_truncated=self._sentiment_input_truncated(
+                        translation.texts[i]
+                    ),
+                )
             )
             for i in range(len(texts))
         ]
+
+    def _sentiment_input_truncated(self, text: str) -> bool:
+        try:
+            encoded = self.classifier.tokenizer(
+                text, add_special_tokens=True, truncation=False
+            )
+            return len(encoded["input_ids"]) > self.classifier.max_length
+        except Exception:
+            return False
 
     def predict_one(self, text: str) -> PipelineResult:
         """Convenience wrapper for a single post."""

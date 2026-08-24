@@ -8,7 +8,7 @@ from collections.abc import Callable
 import config
 from src.intelligence import OllamaProvider
 from src.ollama_gate import OllamaCircuitOpen, OllamaGateFull
-from src.pipeline import PipelineFailure, PipelineResult
+from src.pipeline import PipelineFailure, PipelineResult, annotate_result_quality
 from src.translation import translation_is_usable
 
 
@@ -114,17 +114,22 @@ class OllamaPipelineFallback:
             english_text.strip().casefold()
             != failure.post_text.strip().casefold()
         )
-        return PipelineResult(
-            post_text=failure.post_text,
-            language=failure.language,
-            english_text=english_text,
-            was_translated=failure.language != "en" and changed,
-            was_transliterated=failure.was_transliterated,
-            sentiment=sentiment,
-            confidence=round(confidence, 4),
-            translation_time_ms=translation_ms,
-            sentiment_time_ms=0.0,
-            total_time_ms=translation_ms,
+        return annotate_result_quality(
+            PipelineResult(
+                post_text=failure.post_text,
+                language=failure.language,
+                english_text=english_text,
+                was_translated=failure.language != "en" and changed,
+                was_transliterated=failure.was_transliterated,
+                sentiment=sentiment,
+                confidence=round(confidence, 4),
+                translation_time_ms=translation_ms,
+                sentiment_time_ms=0.0,
+                total_time_ms=translation_ms,
+                translation_backend="ollama_fallback",
+                fallback_used=True,
+                fallback_reason=failure.reason,
+            )
         )
 
     def _validate(

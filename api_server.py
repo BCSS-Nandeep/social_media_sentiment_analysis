@@ -13,6 +13,10 @@ WIRE CONTRACT — deliberately unchanged, this service is consumed in production
         result keys: post_text, language, english_text, was_translated,
         was_transliterated, sentiment, confidence, translation_time_ms,
         sentiment_time_ms, total_time_ms
+        Additive (non-breaking): cleaned_text, transliterated_text,
+        translation_backend, fallback_used, fallback_reason,
+        translation_truncated, sentiment_truncated, low_confidence,
+        review_recommended
     GET  /health                          -> {"healthy": bool, "device": str|null, ...}
 
 `/health` gained additive keys only (`stages`, `limits`, `intelligence`);

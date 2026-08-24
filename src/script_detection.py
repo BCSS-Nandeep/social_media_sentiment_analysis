@@ -26,24 +26,55 @@ UNICODE_RANGES: dict[str, tuple[int, int]] = {
 LATIN_RANGE = (0x0041, 0x024F)  # basic Latin + Latin-1 + Latin Extended-A/B
 
 
+def _script_bucket(ch: str) -> str | None:
+    """Map one character onto latin / an Indic block, including combining marks."""
+    cp = ord(ch)
+    for name, (lo, hi) in UNICODE_RANGES.items():
+        if lo <= cp <= hi:
+            return name
+    if LATIN_RANGE[0] <= cp <= LATIN_RANGE[1] and ch.isalpha():
+        return "latin"
+    return None
+
+
 def detect_script(text: str) -> str:
     """Return the dominant script in *text*: a key of UNICODE_RANGES, 'latin',
     or 'unknown' if no alphabetic character matched any known range."""
     counts: Counter[str] = Counter()
     for ch in text:
-        if not ch.isalpha():
-            continue
-        cp = ord(ch)
-        if LATIN_RANGE[0] <= cp <= LATIN_RANGE[1]:
-            counts["latin"] += 1
-            continue
-        for name, (lo, hi) in UNICODE_RANGES.items():
-            if lo <= cp <= hi:
-                counts[name] += 1
-                break
+        bucket = _script_bucket(ch)
+        if bucket is not None:
+            counts[bucket] += 1
     if not counts:
         return "unknown"
     return counts.most_common(1)[0][0]
+
+
+def latin_letter_ratio(text: str) -> float:
+    """Fraction of script-bearing characters that are Latin."""
+    latin = other = 0
+    for ch in text:
+        bucket = _script_bucket(ch)
+        if bucket is None:
+            continue
+        if bucket == "latin":
+            latin += 1
+        else:
+            other += 1
+    total = latin + other
+    if total == 0:
+        return 0.0
+    return latin / total
+
+
+def extract_latin_text(text: str) -> str:
+    """Keep Latin letters, digits, and whitespace; drop Indic-script characters."""
+    kept: list[str] = []
+    for ch in text:
+        bucket = _script_bucket(ch)
+        if bucket == "latin" or ch.isspace() or (ch.isascii() and not ch.isalpha()):
+            kept.append(ch)
+    return " ".join("".join(kept).split())
 
 
 def is_latin_script(text: str) -> bool:

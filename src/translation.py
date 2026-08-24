@@ -106,6 +106,8 @@ class TranslationResult:
     gpu_peak_mb: float
     translated_mask: np.ndarray  # True where the post was actually translated
     n_cached: int = 0        # posts served from the translation cache (times_ms 0)
+    backends: list[str] | None = None  # bypass | passthrough | indictrans2 | nllb | ...
+    truncated_mask: np.ndarray | None = None
 
 
 def _arabic_script_ratio(text: str) -> float:
@@ -346,6 +348,8 @@ class Translator:
         out_texts: list[str] = list(texts)  # pass-through default
         times_ms = np.zeros(n)
         translated = np.zeros(n, dtype=bool)
+        backends = ["passthrough"] * n
+        truncated = np.zeros(n, dtype=bool)
 
         # Group indices by source language so each batch is monolingual.
         # 'en' is bypassed: genuine English (content AND script both English)
@@ -365,6 +369,7 @@ class Translator:
         n_cached = 0
         for idx, lang in enumerate(languages):
             if lang == "en":
+                backends[idx] = "bypass"
                 continue
             if lang not in FLORES_CODES:
                 skipped_langs.add(lang)
@@ -374,6 +379,7 @@ class Translator:
                 out_texts[idx] = cached
                 translated[idx] = True
                 n_cached += 1
+                backends[idx] = self.cfg.key
                 continue
             groups[lang].append(idx)
         if skipped_langs:
@@ -402,6 +408,10 @@ class Translator:
                             max_length=TRANSLATION_MAX_LENGTH,
                             return_tensors="pt",
                         )
+                        token_counts = encoded["attention_mask"].sum(dim=1)
+                        for local_i, original_i in enumerate(index_batch):
+                            if int(token_counts[local_i]) >= TRANSLATION_MAX_LENGTH:
+                                truncated[original_i] = True
 
                         source_tokens = int(encoded["attention_mask"].sum(dim=1).max())
                         generate_kwargs = self._generate_kwargs(source_tokens)
@@ -454,6 +464,7 @@ class Translator:
                             out_texts[i] = translation if translation else texts[i]
                             times_ms[i] = elapsed_ms / len(index_batch)
                             translated[i] = True
+                            backends[i] = self.cfg.key
                             if translation:
                                 self._cache_put(lang, texts[i], translation)
                         progress.update(len(index_batch))
@@ -471,6 +482,8 @@ class Translator:
             gpu_peak_mb=get_gpu_peak_mb(self.device),
             translated_mask=translated,
             n_cached=n_cached,
+            backends=backends,
+            truncated_mask=truncated,
         )
 
     def free(self) -> None:

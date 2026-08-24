@@ -53,6 +53,40 @@ CHECKPOINT_LANG_LIST = (
 SUPPORTED_LANGS = ("hi", "te", "ta", "kn", "ml", "mr", "bn", "gu", "pa", "ur")
 
 ROMAN_WORD_RE = re.compile(r"^([^A-Za-z]*)([A-Za-z]+)([^A-Za-z]*)$")
+
+# High-precision English tokens to leave in Latin script during IndicXlit.
+# Aksharantar evaluates native-origin vs foreign words separately; transliterating
+# English function/sentiment words in Tenglish/Hinglish damages the downstream
+# Indic→English translator. Closed-class words plus frequent English tokens
+# from this repository's sample posts — not a general dictionary.
+_ENGLISH_PRESERVE = frozenset(
+    {
+        "a", "an", "the", "and", "or", "but", "if", "of", "to", "in", "on", "for",
+        "with", "from", "at", "by", "as", "is", "are", "was", "were", "be", "been",
+        "am", "not", "no", "yes", "this", "that", "these", "those", "it", "its",
+        "good", "bad", "very", "really", "so", "too", "just", "only", "now",
+        "today", "zero", "help", "move", "scheme", "schemes", "village",
+        "disappointing", "implementation", "promises", "meeting", "wait", "see",
+        "clarity", "customer", "care", "response", "perfect", "timing", "great",
+        "job", "total", "waste", "money", "hospital", "services", "fee",
+        "reimbursement", "thank", "you", "outstanding", "work", "progress",
+        "farmers", "power", "cuts", "please", "ok", "okay", "wow", "super",
+        "best", "worst", "free", "food", "crowd", "rally", "success", "failed",
+        "failure",
+    }
+)
+
+
+def should_preserve_roman(word: str) -> bool:
+    """True when IndicXlit must not rewrite this Latin token."""
+    core = word.strip()
+    if not core:
+        return False
+    if core.isupper() and 2 <= len(core) <= 6 and core.isalpha():
+        return True
+    return core.casefold() in _ENGLISH_PRESERVE
+
+
 URDU_NATIVE_OVERRIDES = {
     "teen": "تین",
     "din": "دن",
@@ -191,6 +225,8 @@ class Transliterator:
                     )
                     continue
                 if lang == "ur" and normalized in URDU_PRESERVE_ROMAN:
+                    continue
+                if should_preserve_roman(core):
                     continue
                 xlit_indices.append(i)
                 xlit_parts.append((prefix, core, suffix))

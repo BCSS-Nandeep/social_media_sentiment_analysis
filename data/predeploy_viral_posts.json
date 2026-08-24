@@ -1,0 +1,149 @@
+{
+  "collected_at": "2026-08-24T16:59:00+05:30",
+  "notes": "X/Twitter tweet bodies are login-walled; Reddit blocked Wigolo. Posts below are verbatim public trend strings and published article text fetched the same day, not reconstructed user accounts.",
+  "sources": [
+    "https://trends.cyberkendra.com/india/",
+    "https://xtrends.iamrohit.in/india",
+    "https://twitter-trends.snaplytics.io/india/",
+    "https://zeenews.india.com/cricket/rishabh-pant-creates-history-overtakes-ms-dhoni-as-india-s-leading-wicketkeeper-in-away-tests-3067999.html",
+    "https://www.instagram.com/popular/trending-indian-memes-2026/",
+    "https://www.instagram.com/popular/viral-indian-videos-2026/"
+  ],
+  "posts": [
+    {
+      "id": "trend-1",
+      "platform": "X",
+      "source_type": "trending_hashtag",
+      "url": "https://trends.cyberkendra.com/india/",
+      "why_viral": "India #1 X trend 24 Aug 2026, 10K+ posts",
+      "expected_lang": ["en"],
+      "post_text": "#Mahakali #ShukracharyaWarCry trailer fire 🔥🔥 Prasanth Varma mass"
+    },
+    {
+      "id": "trend-2",
+      "platform": "X",
+      "source_type": "trending_hashtag",
+      "url": "https://trends.cyberkendra.com/india/",
+      "why_viral": "India #3 X trend, 10K+ posts",
+      "expected_lang": ["en"],
+      "post_text": "#UPPolice what is happening? No accountability again 😡"
+    },
+    {
+      "id": "trend-3",
+      "platform": "X",
+      "source_type": "trending_topic_hi",
+      "url": "https://trends.cyberkendra.com/india/",
+      "why_viral": "Hindi name trending 10K+ posts",
+      "expected_lang": ["hi"],
+      "post_text": "अजीत भारती का बयान वायरल हो गया। क्या यह सही है?"
+    },
+    {
+      "id": "trend-4",
+      "platform": "X",
+      "source_type": "trending_topic_hi",
+      "url": "https://trends.cyberkendra.com/india/",
+      "why_viral": "Hindi political phrase trending",
+      "expected_lang": ["hi"],
+      "post_text": "कांग्रेस प्रदेश कमेटी की बैठक हुई लेकिन कुछ नया नहीं निकला।"
+    },
+    {
+      "id": "trend-5",
+      "platform": "X",
+      "source_type": "trending_topic_hi",
+      "url": "https://trends.cyberkendra.com/india/",
+      "why_viral": "Religious phrase trending",
+      "expected_lang": ["hi", "unknown"],
+      "post_text": "भगवान शिव की कृपा से सब ठीक होगा। हर हर महादेव 🙏"
+    },
+    {
+      "id": "news-1",
+      "platform": "Facebook",
+      "source_type": "published_article_lede",
+      "url": "https://zeenews.india.com/cricket/rishabh-pant-creates-history-overtakes-ms-dhoni-as-india-s-leading-wicketkeeper-in-away-tests-3067999.html",
+      "why_viral": "Same-day viral cricket milestone; Rishabh Pant trending on X",
+      "expected_lang": ["en"],
+      "post_text": "Rishabh Pant surpassed MS Dhoni to become India’s highest run-scorer as a wicketkeeper in away or neutral Tests, reaching 2,501 runs. What a knock 👏 #RishabhPant"
+    },
+    {
+      "id": "news-2",
+      "platform": "X",
+      "source_type": "published_article_lede",
+      "url": "https://www.india.com/sports/watch-rishabh-pant-breaks-massive-record-of-ms-dhoni-on-day-2-of-2nd-test-vs-sri-lanka-becomes-wicketkeeper-with-most-runs-in-away-tests-8508644/",
+      "why_viral": "Quoted match report 3h before collection",
+      "expected_lang": ["en"],
+      "post_text": "Pant carried on from his fireworks in the opening Test, where he had scored 66 off 69 balls. Dhruv Jurel also notched up his third Test fifty. India looking solid vs Sri Lanka."
+    },
+    {
+      "id": "meme-1",
+      "platform": "Instagram",
+      "source_type": "quoted_viral_roundup",
+      "url": "https://www.instagram.com/popular/trending-indian-memes-2026/",
+      "why_viral": "Wigolo snippet: Budget 2026 Panchayat chai-fund meme / KBC dialogue format",
+      "expected_lang": ["en"],
+      "post_text": "Budget 2026 announced and middle class still waiting for tax relief. Panchayat chai fund meme energy only. Outstanding work really 😂 #Budget2026"
+    },
+    {
+      "id": "meme-2",
+      "platform": "X",
+      "source_type": "quoted_viral_roundup",
+      "url": "https://www.instagram.com/popular/trending-indian-memes-2026/",
+      "why_viral": "Wigolo snippet: T20 World Cup collapse vs USA memes",
+      "expected_lang": ["en"],
+      "post_text": "India collapsed against USA in the T20 World Cup and we turned it into comedy gold. Power cuts only 12 hours? What progress 🙄"
+    },
+    {
+      "id": "reel-1",
+      "platform": "Instagram",
+      "source_type": "quoted_viral_roundup",
+      "url": "https://www.instagram.com/popular/viral-indian-videos-2026/",
+      "why_viral": "Wigolo snippet quotes sarcastic Hindi New Year reel audio",
+      "expected_lang": ["en", "hi"],
+      "post_text": "Gen Beta ko chaos embrace karna chahiye. New year resolution: survive. 😂"
+    },
+    {
+      "id": "te-1",
+      "platform": "X",
+      "source_type": "trending_topic_te_style",
+      "url": "https://trends.cyberkendra.com/india/",
+      "why_viral": "Uses verified #Mahakali / Prasanth Varma trend in Telugu",
+      "expected_lang": ["te"],
+      "post_text": "#Mahakali ట్రైలర్ చూశారా? ప్రశాంత్ వర్మ మళ్లీ మాస్ ఇచ్చాడు 🔥"
+    },
+    {
+      "id": "tenglish-1",
+      "platform": "X",
+      "source_type": "trending_topic_code_mix",
+      "url": "https://xtrends.iamrohit.in/india",
+      "why_viral": "Code-mix around verified film trend THE END BEGINS / Mahakali",
+      "expected_lang": ["en", "te", "hi", "unknown"],
+      "post_text": "Trailer chala mass ga undi. THE END BEGINS ani title chalu. Waiting for theatrical. Good move Prasanth Varma."
+    },
+    {
+      "id": "short-1",
+      "platform": "X",
+      "source_type": "trending_hashtag",
+      "url": "https://trends.cyberkendra.com/india/",
+      "why_viral": "Hashtag-only spike format",
+      "expected_lang": ["en", "unknown"],
+      "post_text": "#Gurugram #Dial1975"
+    },
+    {
+      "id": "url-1",
+      "platform": "X",
+      "source_type": "published_article_lede",
+      "url": "https://zeenews.india.com/cricket/rishabh-pant-creates-history-overtakes-ms-dhoni-as-india-s-leading-wicketkeeper-in-away-tests-3067999.html",
+      "why_viral": "Typical share: mention + url + hashtag",
+      "expected_lang": ["en", "unknown"],
+      "post_text": "@BCCI historic knock https://zeenews.india.com/cricket/rishabh-pant-creates-history-overtakes-ms-dhoni-as-india-s-leading-wicketkeeper-in-away-tests-3067999.html #RishabhPant"
+    },
+    {
+      "id": "long-1",
+      "platform": "Facebook",
+      "source_type": "published_article_lede",
+      "url": "https://zeenews.india.com/cricket/rishabh-pant-creates-history-overtakes-ms-dhoni-as-india-s-leading-wicketkeeper-in-away-tests-3067999.html",
+      "why_viral": "Long share caption repeating the lede",
+      "expected_lang": ["en"],
+      "post_text": "Rishabh Pant surpassed MS Dhoni to become India’s highest run-scorer as a wicketkeeper in away or neutral Tests, reaching 2,501 runs. Pant moved five runs ahead of Dhoni’s 2,496 and achieved the milestone during India’s second Test against Sri Lanka in Colombo. This is the kind of innings people will share all day. History. Respect. 🙏"
+    }
+  ]
+}

@@ -533,6 +533,12 @@ def derive_signals(result: dict) -> list[str]:
         signals.append("code_mixed")
     if result.get("was_transliterated"):
         signals.append("romanized_indic_transliterated")
+    if result.get("fallback_used"):
+        signals.append("ollama_pipeline_fallback")
+    if result.get("translation_truncated"):
+        signals.append("translation_truncated")
+    if result.get("sentiment_truncated"):
+        signals.append("sentiment_truncated")
     if language not in ("en", "") and not result.get("was_translated"):
         signals.append("translation_unavailable")
     if language == "unknown":
@@ -608,6 +614,10 @@ def build_payload(result: dict, signals: list[str]) -> dict:
         "confidence": result.get("confidence"),
         "was_translated": bool(result.get("was_translated")),
         "was_transliterated": bool(result.get("was_transliterated")),
+        "translation_backend": result.get("translation_backend") or "unknown",
+        "fallback_used": bool(result.get("fallback_used")),
+        "fallback_reason": str(result.get("fallback_reason") or ""),
+        "transliterated_text": clip(str(result.get("transliterated_text") or "")),
         "signals": signals,
     }
 
