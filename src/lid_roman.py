@@ -79,6 +79,8 @@ _ROMANIZED_INDIC_CUE_LANG: dict[str, str] = {
     "inka": "te", "kaani": "te", "kada": "te", "gaa": "te", "ani": "te",
     "bagundi": "te", "baagundi": "te", "chestunnav": "te", "nijam": "te",
     "enti": "te", "unnaru": "te", "vallu": "te", "ra": "te",
+    "assalu": "te", "bagoledu": "te", "chesaru": "te", "kaadu": "te",
+    "kadu": "te", "manchidi": "te", "cheyyali": "te",
     "thumba": "kn",
     "romba": "ta", "irukku": "ta",
     "aanu": "ml",

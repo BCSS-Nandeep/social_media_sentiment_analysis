@@ -57,8 +57,8 @@ ROMAN_WORD_RE = re.compile(r"^([^A-Za-z]*)([A-Za-z]+)([^A-Za-z]*)$")
 # High-precision English tokens to leave in Latin script during IndicXlit.
 # Aksharantar evaluates native-origin vs foreign words separately; transliterating
 # English function/sentiment words in Tenglish/Hinglish damages the downstream
-# Indic→English translator. Closed-class words plus frequent English tokens
-# from this repository's sample posts — not a general dictionary.
+# Indic→English translator. Closed-class words, polarity adjectives/adverbs,
+# and common social-app nouns — not a general dictionary.
 _ENGLISH_PRESERVE = frozenset(
     {
         "a", "an", "the", "and", "or", "but", "if", "of", "to", "in", "on", "for",
@@ -73,8 +73,22 @@ _ENGLISH_PRESERVE = frozenset(
         "farmers", "power", "cuts", "please", "ok", "okay", "wow", "super",
         "best", "worst", "free", "food", "crowd", "rally", "success", "failed",
         "failure",
+        "use", "used", "useful", "useless", "improve", "improved", "better",
+        "worse", "still", "never", "always", "cannot", "need", "needed",
+        "should", "must", "waiting", "theatrical", "trailer", "mass", "nice",
+        "amazing", "awesome", "excellent", "terrible", "horrible", "poor",
+        "love", "hate", "like", "update", "app", "service", "team", "crash",
+        "crashed", "slow", "fast", "fix", "fixed", "broken", "issue", "issues",
+        "quality", "support", "login",
     }
 )
+
+_REPEAT_LETTER_RE = re.compile(r"(.)\1+")
+
+
+def _collapse_repeat_letters(core: str) -> str:
+    """Social-media elongation: chaala→chala, baagundi→bagundi."""
+    return _REPEAT_LETTER_RE.sub(r"\1", core.casefold())
 
 
 def should_preserve_roman(word: str) -> bool:
@@ -84,7 +98,56 @@ def should_preserve_roman(word: str) -> bool:
         return False
     if core.isupper() and 2 <= len(core) <= 6 and core.isalpha():
         return True
-    return core.casefold() in _ENGLISH_PRESERVE
+    folded = core.casefold()
+    return folded in _ENGLISH_PRESERVE or _collapse_repeat_letters(folded) in _ENGLISH_PRESERVE
+
+
+# High-frequency Tenglish stems where IndicXlit Top-1 is systematically wrong
+# on social spelling (probe: bagundi→బ్బగుంది, kaadu→కాడు, undi→ఉండి).
+# Same pattern as URDU_NATIVE_OVERRIDES. Not a general dictionary.
+TELUGU_NATIVE_OVERRIDES = {
+    "chala": "చాలా",
+    "chaala": "చాలా",
+    "baga": "బాగా",
+    "baaga": "బాగా",
+    "bagundi": "బాగుంది",
+    "baagundi": "బాగుంది",
+    "undi": "ఉంది",
+    "undhi": "ఉంది",
+    "kaadu": "కాదు",
+    "kadu": "కాదు",
+    "ledu": "లేదు",
+    "bagoledu": "బాగోలేదు",
+    "assalu": "అస్సలు",
+    "manchidi": "మంచిది",
+    "chesaru": "చేశారు",
+    "cheyyali": "చెయ్యాలి",
+    "ayyindi": "అయ్యింది",
+    "nenu": "నేను",
+    "inka": "ఇంకా",
+    "emi": "ఏమి",
+}
+
+_POLARITY_ENGLISH = frozenset(
+    {
+        "good", "bad", "worst", "best", "super", "great", "not", "no", "never",
+        "excellent", "terrible", "horrible", "poor", "love", "hate", "useful",
+        "useless", "better", "worse",
+    }
+)
+
+
+def source_polarity_tokens(text: str) -> set[str]:
+    found: set[str] = set()
+    for token in text.replace(".", " ").split():
+        match = ROMAN_WORD_RE.fullmatch(token)
+        if match is None:
+            continue
+        core = match.group(2).casefold()
+        collapsed = _collapse_repeat_letters(core)
+        if core in _POLARITY_ENGLISH or collapsed in _POLARITY_ENGLISH:
+            found.add(core if core in _POLARITY_ENGLISH else collapsed)
+    return found
 
 
 URDU_NATIVE_OVERRIDES = {
@@ -219,6 +282,7 @@ class Transliterator:
                 if any(char.isalnum() for char in prefix + suffix):
                     continue
                 normalized = core.lower()
+                collapsed = _collapse_repeat_letters(normalized)
                 if lang == "ur" and normalized in URDU_NATIVE_OVERRIDES:
                     out_words[i] = (
                         prefix + URDU_NATIVE_OVERRIDES[normalized] + suffix
@@ -228,8 +292,15 @@ class Transliterator:
                     continue
                 if should_preserve_roman(core):
                     continue
+                if lang == "te":
+                    native = TELUGU_NATIVE_OVERRIDES.get(normalized) or (
+                        TELUGU_NATIVE_OVERRIDES.get(collapsed)
+                    )
+                    if native:
+                        out_words[i] = prefix + native + suffix
+                        continue
                 xlit_indices.append(i)
-                xlit_parts.append((prefix, core, suffix))
+                xlit_parts.append((prefix, collapsed or normalized, suffix))
             if not xlit_indices:
                 return " ".join(out_words)
             spaced_batch = [

@@ -20,6 +20,7 @@ to translate from.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections import Counter, OrderedDict, defaultdict
@@ -46,6 +47,7 @@ from config import (
     TranslationConfig,
 )
 from src.inference_watchdog import guarded_model_call
+from src.transliteration import source_polarity_tokens
 from src.utils import chunked, get_gpu_peak_mb, get_model_size_mb, reset_gpu_peak
 
 logger = logging.getLogger("benchmark.translation")
@@ -118,6 +120,25 @@ def _arabic_script_ratio(text: str) -> float:
     return arabic / len(letters)
 
 
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?।])\s+")
+
+
+def split_translation_chunks(text: str) -> list[str]:
+    """Split only when sentence boundaries exist.
+
+    IndicTrans2 is trained at sentence level (Gala et al., arXiv:2305.16307).
+    This repo still translates the whole post by default; chunks are used
+    only when the tokenizer would truncate a long multi-sentence post.
+    """
+    text = str(text or "").strip()
+    if not text:
+        return [text]
+    parts = [part.strip() for part in _SENTENCE_SPLIT_RE.split(text) if part.strip()]
+    if len(parts) >= 2:
+        return parts
+    return [text]
+
+
 def translation_is_usable(source: str, translated: str) -> bool:
     """Reject outputs that cannot be a credible English translation."""
     source = str(source or "").strip()
@@ -143,6 +164,11 @@ def translation_is_usable(source: str, translated: str) -> bool:
     if len(tokens) >= 8:
         most_common = Counter(tokens).most_common(1)[0][1]
         if most_common / len(tokens) >= TRANSLATION_REPEAT_TOKEN_RATIO:
+            return False
+    polarity = source_polarity_tokens(source)
+    if polarity:
+        folded = translated.casefold()
+        if not any(token in folded for token in polarity):
             return False
     return True
 
@@ -467,6 +493,56 @@ class Translator:
                             backends[i] = self.cfg.key
                             if translation:
                                 self._cache_put(lang, texts[i], translation)
+                        for original_i in index_batch:
+                            if not truncated[original_i]:
+                                continue
+                            chunks = split_translation_chunks(texts[original_i])
+                            if len(chunks) < 2:
+                                continue
+                            piece_out: list[str] = []
+                            chunk_truncated = False
+                            for chunk in chunks:
+                                prepared_chunk = self._prepare_batch([chunk], src_flores)
+                                encoded_chunk = self.tokenizer(
+                                    prepared_chunk,
+                                    truncation=True,
+                                    padding=True,
+                                    max_length=TRANSLATION_MAX_LENGTH,
+                                    return_tensors="pt",
+                                )
+                                if int(encoded_chunk["attention_mask"].sum()) >= TRANSLATION_MAX_LENGTH:
+                                    chunk_truncated = True
+                                    break
+                                source_tokens = int(encoded_chunk["attention_mask"].sum())
+                                generate_kwargs = self._generate_kwargs(source_tokens)
+
+                                encoded_chunk_local = encoded_chunk
+                                generate_kwargs_local = generate_kwargs
+
+                                def generate_chunk(
+                                    encoded_chunk=encoded_chunk_local,
+                                    generate_kwargs=generate_kwargs_local,
+                                ):
+                                    encoded_on_device = encoded_chunk.to(self.device)
+                                    generated_chunk = self.model.generate(
+                                        **encoded_on_device, **generate_kwargs
+                                    )
+                                    return generated_chunk
+
+                                generated_chunk = guarded_model_call(
+                                    generate_chunk, INFERENCE_HARD_TIMEOUT_S
+                                )
+                                decoded_chunk = self.tokenizer.batch_decode(
+                                    generated_chunk, skip_special_tokens=True,
+                                    clean_up_tokenization_spaces=True,
+                                )
+                                piece_out.extend(self._postprocess(decoded_chunk))
+                            if piece_out and not chunk_truncated:
+                                joined = " ".join(part for part in piece_out if part)
+                                if joined:
+                                    out_texts[original_i] = joined
+                                    truncated[original_i] = False
+                                    self._cache_put(lang, texts[original_i], joined)
                         progress.update(len(index_batch))
         progress.close()
 

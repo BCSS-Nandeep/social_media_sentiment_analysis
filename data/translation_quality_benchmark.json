@@ -1,0 +1,236 @@
+{
+  "notes": "Author-constructed translation-quality set. Measures routing, xlit, Englishness, and critical-term survival — not Cardiff. Human/LLM-assisted meaning checks are labelled semantic_check. Limitations: synthetic, Telugu-heavy, no crowd references, no COMET scores in CI.",
+  "posts": [
+    {
+      "id": "te-chaala-bagundi",
+      "language": "te",
+      "split": "tenglish",
+      "source_text": "chaala bagundi",
+      "expected_meaning": "very good",
+      "important_terms": ["good", "very"],
+      "critical_phrase": "bagundi",
+      "polarity": "positive",
+      "semantic_check": true
+    },
+    {
+      "id": "te-chala-bagundi",
+      "language": "te",
+      "split": "tenglish",
+      "source_text": "chala bagundi",
+      "expected_meaning": "very good",
+      "important_terms": ["good"],
+      "critical_phrase": "bagundi",
+      "polarity": "positive",
+      "semantic_check": true
+    },
+    {
+      "id": "te-assalu-bagoledu",
+      "language": "te",
+      "split": "tenglish",
+      "source_text": "assalu bagoledu",
+      "expected_meaning": "not good at all",
+      "important_terms": ["not", "good"],
+      "critical_phrase": "bagoledu",
+      "polarity": "negative",
+      "semantic_check": true
+    },
+    {
+      "id": "te-worst-undi",
+      "language": "te",
+      "split": "code_mix",
+      "source_text": "chala worst ga undi",
+      "expected_meaning": "it is very worst",
+      "important_terms": ["worst"],
+      "critical_phrase": "worst",
+      "polarity": "negative",
+      "semantic_check": true
+    },
+    {
+      "id": "te-use-ledu",
+      "language": "te",
+      "split": "code_mix",
+      "source_text": "emi use ledu",
+      "expected_meaning": "no use at all",
+      "important_terms": ["use"],
+      "critical_phrase": "use ledu",
+      "polarity": "negative",
+      "semantic_check": true
+    },
+    {
+      "id": "te-improve",
+      "language": "te",
+      "split": "code_mix",
+      "source_text": "baaga improve ayyindi",
+      "expected_meaning": "it improved well",
+      "important_terms": ["improve"],
+      "critical_phrase": "improve",
+      "polarity": "positive",
+      "semantic_check": true
+    },
+    {
+      "id": "te-better",
+      "language": "te",
+      "split": "code_mix",
+      "source_text": "inka better cheyyali",
+      "expected_meaning": "still needs to be better",
+      "important_terms": ["better"],
+      "critical_phrase": "better",
+      "polarity": "neutral",
+      "semantic_check": true
+    },
+    {
+      "id": "te-bagundi-kaadu",
+      "language": "te",
+      "split": "negation",
+      "source_text": "bagundi kaadu",
+      "expected_meaning": "it is not good",
+      "important_terms": ["not"],
+      "critical_phrase": "kaadu",
+      "polarity": "negative",
+      "semantic_check": true
+    },
+    {
+      "id": "te-scheme-bagundi",
+      "language": "te",
+      "split": "code_mix",
+      "source_text": "scheme chala bagundi",
+      "expected_meaning": "the scheme is very good",
+      "important_terms": ["scheme", "good"],
+      "critical_phrase": "bagundi",
+      "polarity": "positive",
+      "semantic_check": true
+    },
+    {
+      "id": "te-chesaru",
+      "language": "te",
+      "split": "tenglish",
+      "source_text": "super ga chesaru",
+      "expected_meaning": "they did it super / well",
+      "important_terms": ["super"],
+      "critical_phrase": "chesaru",
+      "polarity": "positive",
+      "semantic_check": true
+    },
+    {
+      "id": "te-kaadu",
+      "language": "te",
+      "split": "negation",
+      "source_text": "manchidi kaadu",
+      "expected_meaning": "it is not good",
+      "important_terms": ["not"],
+      "critical_phrase": "kaadu",
+      "polarity": "negative",
+      "semantic_check": true
+    },
+    {
+      "id": "te-good-chesaru",
+      "language": "te",
+      "split": "code_mix",
+      "source_text": "good ga chesaru",
+      "expected_meaning": "they did it well",
+      "important_terms": ["good"],
+      "critical_phrase": "good",
+      "polarity": "positive",
+      "semantic_check": true
+    },
+    {
+      "id": "te-scheme-bagoledu",
+      "language": "te",
+      "split": "code_mix",
+      "source_text": "scheme assalu bagoledu",
+      "expected_meaning": "the scheme is not good at all",
+      "important_terms": ["scheme", "not"],
+      "critical_phrase": "bagoledu",
+      "polarity": "negative",
+      "semantic_check": true
+    },
+    {
+      "id": "te-en-heavy",
+      "language": "te",
+      "split": "english_heavy",
+      "source_text": "Trailer chala mass ga undi. Waiting for theatrical. Good move.",
+      "expected_meaning": "trailer is very mass, waiting for theatrical, good move",
+      "important_terms": ["good", "move"],
+      "critical_phrase": "Good move",
+      "polarity": "positive",
+      "semantic_check": true
+    },
+    {
+      "id": "te-chesaru-alone",
+      "language": "te",
+      "split": "tenglish",
+      "source_text": "chesaru",
+      "expected_meaning": "they did (it)",
+      "important_terms": ["did"],
+      "critical_phrase": "chesaru",
+      "polarity": "neutral",
+      "semantic_check": true
+    },
+    {
+      "id": "te-kaadu-alone",
+      "language": "te",
+      "split": "negation",
+      "source_text": "kaadu",
+      "expected_meaning": "no / not",
+      "important_terms": ["not"],
+      "critical_phrase": "kaadu",
+      "polarity": "negative",
+      "semantic_check": true
+    },
+    {
+      "id": "te-repeat-letters",
+      "language": "te",
+      "split": "tenglish",
+      "source_text": "chaaaaala bagundiii",
+      "expected_meaning": "very good",
+      "important_terms": ["good"],
+      "critical_phrase": "bagundi",
+      "polarity": "positive",
+      "semantic_check": true
+    },
+    {
+      "id": "te-colloquial-ra",
+      "language": "te",
+      "split": "tenglish",
+      "source_text": "bagundi ra",
+      "expected_meaning": "it is good",
+      "important_terms": ["good"],
+      "critical_phrase": "bagundi",
+      "polarity": "positive",
+      "semantic_check": true
+    },
+    {
+      "id": "te-native-pos",
+      "language": "te",
+      "split": "native",
+      "source_text": "ప్రభుత్వం ప్రకటించిన కొత్త పథకం చాలా బాగుంది",
+      "expected_meaning": "the new government scheme is very good",
+      "important_terms": ["good", "scheme"],
+      "critical_phrase": "బాగుంది",
+      "polarity": "positive",
+      "semantic_check": true
+    },
+    {
+      "id": "hi-native-neg",
+      "language": "hi",
+      "split": "native",
+      "source_text": "सेवा बहुत खराब है। घंटों से कोई जवाब नहीं आ रहा।",
+      "expected_meaning": "service is very bad, no reply for hours",
+      "important_terms": ["bad", "not"],
+      "critical_phrase": "खराब",
+      "polarity": "negative",
+      "semantic_check": true
+    },
+    {
+      "id": "en-bypass",
+      "language": "en",
+      "split": "english",
+      "source_text": "very good",
+      "expected_meaning": "very good",
+      "important_terms": ["good"],
+      "critical_phrase": "good",
+      "polarity": "positive",
+      "semantic_check": false
+    }
+  ]
+}

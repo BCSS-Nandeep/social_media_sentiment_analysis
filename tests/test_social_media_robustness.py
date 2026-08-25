@@ -54,6 +54,35 @@ class EnglishPreserveTransliterationTests(unittest.TestCase):
         self.assertFalse(transliteration.should_preserve_roman("ayyindi"))
         self.assertFalse(transliteration.should_preserve_roman("chala"))
         self.assertFalse(transliteration.should_preserve_roman("nenu"))
+        self.assertTrue(transliteration.should_preserve_roman("improve"))
+        self.assertTrue(transliteration.should_preserve_roman("better"))
+        self.assertTrue(transliteration.should_preserve_roman("use"))
+
+    def test_telugu_sentiment_stems_use_native_overrides_not_model(self):
+        class FakeModel:
+            def translate(self, prepared, beam):
+                self.prepared = prepared
+                return ["WRONG"] * len(prepared)
+
+        service = Transliterator.__new__(Transliterator)
+        service.models = {"te": FakeModel()}
+        result = service.transliterate("chaala bagundi kaadu", "te")
+        self.assertIn("చాలా", result)
+        self.assertIn("బాగుంది", result)
+        self.assertIn("కాదు", result)
+        self.assertNotIn("WRONG", result)
+
+    def test_english_code_mix_verbs_are_not_transliterated(self):
+        class FakeModel:
+            def translate(self, prepared, beam):
+                self.prepared = prepared
+                return ["చేశారు"] * len(prepared)
+
+        service = Transliterator.__new__(Transliterator)
+        service.models = {"te": FakeModel()}
+        result = service.transliterate("scheme chala improve ayyindi", "te")
+        self.assertIn("scheme", result)
+        self.assertIn("improve", result)
 
     def test_transliterate_skips_english_tokens(self):
         class FakeModel:

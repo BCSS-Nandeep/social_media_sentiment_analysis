@@ -496,6 +496,29 @@ class TranslationFallbackTests(unittest.TestCase):
                 "جس کسی کی نماز نہیں ہوئی", "Whoever has not performed the prayer"
             )
         )
+        self.assertFalse(
+            translation.translation_is_usable(
+                "చాలా worst గా ఉంది", "It has been going on"
+            )
+        )
+        self.assertTrue(
+            translation.translation_is_usable(
+                "చాలా worst గా ఉంది", "It is the worst"
+            )
+        )
+
+    def test_long_posts_split_on_sentence_boundaries(self):
+        chunks = translation.split_translation_chunks(
+            "First sentence. Second sentence! Third one?"
+        )
+        self.assertEqual(
+            ["First sentence.", "Second sentence!", "Third one?"],
+            chunks,
+        )
+        self.assertEqual(
+            ["short undi"],
+            translation.split_translation_chunks("short undi"),
+        )
 
     def test_primary_exception_uses_fallback(self):
         service = pipeline.SentimentPipeline.__new__(pipeline.SentimentPipeline)
