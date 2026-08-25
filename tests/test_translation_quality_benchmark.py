@@ -56,10 +56,26 @@ class TranslationQualityFixtureTests(unittest.TestCase):
         self.assertTrue(callable(mod.chunked))
         self.assertTrue(callable(mod.reset_gpu_peak))
 
-    def test_usable_gate_keeps_polarity_english(self):
+    def test_usable_gate_preserves_polarity_class_not_exact_token(self):
+        # Polarity loss — no sentiment left
         self.assertFalse(
             translation_is_usable("chala worst ga undi", "It continues")
         )
+        # Exact token still accepted
         self.assertTrue(
             translation_is_usable("chala worst ga undi", "It is the worst")
+        )
+        # Synonym / paraphrase must be accepted (previous lexical gate failed these)
+        self.assertTrue(
+            translation_is_usable("chala worst ga undi", "It's very bad")
+        )
+        self.assertTrue(
+            translation_is_usable("good ga chesaru", "well done")
+        )
+        # Polarity reversal must still be rejected
+        self.assertFalse(
+            translation_is_usable("chala worst ga undi", "It's very good")
+        )
+        self.assertFalse(
+            translation_is_usable("good ga chesaru", "It was terrible")
         )

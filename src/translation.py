@@ -139,6 +139,139 @@ def split_translation_chunks(text: str) -> list[str]:
     return [text]
 
 
+# Closed English polarity lexicons for the usable-gate check.
+# Inspired by sentiment-aware MT evaluation (SAM / SentiWord-style prior
+# polarities; Orăsan & Tantawy, arXiv:2109.14895): judge polarity class
+# preservation, not exact token identity. Paraphrases ("worst"→"bad",
+# "good"→"well") must pass; polarity loss or reversal must fail.
+# No extra neural QE / LLM — research shows those help overall quality but
+# are unnecessary for this narrow production gate.
+_POSITIVE_ENGLISH = frozenset(
+    {
+        "good", "well", "best", "better", "super", "great", "excellent",
+        "amazing", "awesome", "nice", "love", "useful", "fine", "perfect",
+        "wonderful", "happy", "glad", "positive",
+    }
+)
+_NEGATIVE_ENGLISH = frozenset(
+    {
+        "bad", "worst", "worse", "terrible", "horrible", "poor", "hate",
+        "useless", "awful", "negative", "disappointing", "failed", "failure",
+    }
+)
+_NEGATION_ENGLISH = frozenset(
+    {
+        "not", "no", "never", "neither", "nor", "without", "none", "cannot",
+        "cant",
+    }
+)
+_SOURCE_TOKEN_POLARITY = {
+    "good": "pos",
+    "best": "pos",
+    "super": "pos",
+    "great": "pos",
+    "excellent": "pos",
+    "love": "pos",
+    "useful": "pos",
+    "better": "pos",
+    "bad": "neg",
+    "worst": "neg",
+    "worse": "neg",
+    "terrible": "neg",
+    "horrible": "neg",
+    "poor": "neg",
+    "hate": "neg",
+    "useless": "neg",
+    "not": "negation",
+    "no": "negation",
+    "never": "negation",
+}
+_ENGLISH_WORD_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
+
+
+def _english_word_cores(text: str) -> list[str]:
+    cores: list[str] = []
+    for match in _ENGLISH_WORD_RE.finditer(str(text or "")):
+        raw = match.group(0).casefold()
+        if raw.endswith("n't"):
+            cores.append("not")
+            stem = raw[:-3]
+            if stem and stem not in {"wo", "ca", "sha", "ai"}:
+                cores.append(stem)
+            elif stem == "ca":
+                cores.append("can")
+            continue
+        cores.append(raw)
+    return cores
+
+
+def _effective_polarity(has_pos: bool, has_neg: bool, has_negation: bool) -> str:
+    """Collapse lexicon hits into a coarse polarity label.
+
+    Negation flips a lone positive or lone negative cue ("not good" → neg,
+    "not bad" → pos). Mixed cues stay mixed; no cues → none.
+    """
+    if has_negation:
+        if has_pos and not has_neg:
+            return "neg"
+        if has_neg and not has_pos:
+            return "pos"
+        if has_pos and has_neg:
+            return "mixed"
+        return "negation_only"
+    if has_pos and has_neg:
+        return "mixed"
+    if has_pos:
+        return "pos"
+    if has_neg:
+        return "neg"
+    return "none"
+
+
+def polarity_is_preserved(source: str, translated: str) -> bool:
+    """True when English polarity cues survive paraphrase (not exact match).
+
+    Only applies when the *source* carries English polarity/negation tokens
+    (code-mix). Pure Indic polarity is left to the MT models — this gate does
+    not invent a second sentiment classifier.
+    """
+    src_tokens = source_polarity_tokens(source)
+    if not src_tokens:
+        return True
+
+    src_pos = any(_SOURCE_TOKEN_POLARITY.get(token) == "pos" for token in src_tokens)
+    src_neg = any(_SOURCE_TOKEN_POLARITY.get(token) == "neg" for token in src_tokens)
+    src_negation = any(
+        _SOURCE_TOKEN_POLARITY.get(token) == "negation" for token in src_tokens
+    )
+    # Bare English negation with no sentiment adjective still requires a
+    # negation cue in the translation (negation drop flips meaning).
+    if src_negation and not src_pos and not src_neg:
+        tgt_cores = _english_word_cores(translated)
+        return any(
+            core in _NEGATION_ENGLISH or core.endswith("n't")
+            for core in tgt_cores
+        )
+
+    src_eff = _effective_polarity(src_pos, src_neg, src_negation)
+    if src_eff not in {"pos", "neg"}:
+        return True
+
+    tgt_cores = _english_word_cores(translated)
+    tgt_pos = any(core in _POSITIVE_ENGLISH for core in tgt_cores)
+    tgt_neg = any(core in _NEGATIVE_ENGLISH for core in tgt_cores)
+    tgt_negation = any(
+        core in _NEGATION_ENGLISH or core.endswith("n't") for core in tgt_cores
+    )
+    tgt_eff = _effective_polarity(tgt_pos, tgt_neg, tgt_negation)
+
+    if tgt_eff == "none":
+        return False  # polarity loss
+    if tgt_eff in {"pos", "neg"} and tgt_eff != src_eff:
+        return False  # polarity reversal
+    return True
+
+
 def translation_is_usable(source: str, translated: str) -> bool:
     """Reject outputs that cannot be a credible English translation."""
     source = str(source or "").strip()
@@ -165,11 +298,8 @@ def translation_is_usable(source: str, translated: str) -> bool:
         most_common = Counter(tokens).most_common(1)[0][1]
         if most_common / len(tokens) >= TRANSLATION_REPEAT_TOKEN_RATIO:
             return False
-    polarity = source_polarity_tokens(source)
-    if polarity:
-        folded = translated.casefold()
-        if not any(token in folded for token in polarity):
-            return False
+    if not polarity_is_preserved(source, translated):
+        return False
     return True
 
 

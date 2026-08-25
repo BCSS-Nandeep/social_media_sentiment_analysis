@@ -506,6 +506,21 @@ class TranslationFallbackTests(unittest.TestCase):
                 "చాలా worst గా ఉంది", "It is the worst"
             )
         )
+        self.assertTrue(
+            translation.translation_is_usable(
+                "చాలా worst గా ఉంది", "It's very bad"
+            )
+        )
+        self.assertTrue(
+            translation.translation_is_usable(
+                "good ga chesaru", "well done"
+            )
+        )
+        self.assertFalse(
+            translation.translation_is_usable(
+                "చాలా worst గా ఉంది", "It's very good"
+            )
+        )
 
     def test_long_posts_split_on_sentence_boundaries(self):
         chunks = translation.split_translation_chunks(
