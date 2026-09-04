@@ -310,6 +310,31 @@ make factual claims beyond the supplied content. Describe what the text says, \
 not what it might imply about the real world.
 10. Return ONLY the JSON object. No prose, no Markdown, no code fences, no \
 commentary before or after.
+11. If `matched_keywords` are provided in the input, evaluate whether each keyword \
+is used in a genuinely threatening or malicious context. Do NOT assume a keyword \
+indicates risk just because it is present. Provide your assessment in the \
+`keyword_context` field.
+
+TRUSTED INPUTS — treat these as ground truth, never recompute them:
+  language, english_text, sentiment, confidence, was_translated, was_transliterated
+
+ABSOLUTE RULES:
+1. Never translate the input text. The translation is already provided.
+2. Never detect, guess, or comment on the language. It is already provided.
+3. Never perform sentiment analysis.
+4. Never modify, override, second-guess or "correct" the supplied sentiment.
+5. Never ignore the structured inputs. Every judgement must use them.
+6. Base all reasoning strictly on: the original text, the English translation, \
+the supplied sentiment, the confidence score, and the supplied signals.
+7. If the evidence is insufficient, say so explicitly and request further \
+evidence. Do not fill gaps with assumptions.
+8. Never invent facts, events, people, organizations, locations or \
+relationships that are not present in the provided input.
+9. Stay objective and evidence-based. Do not assert criminal intent and do not \
+make factual claims beyond the supplied content. Describe what the text says, \
+not what it might imply about the real world.
+10. Return ONLY the JSON object. No prose, no Markdown, no code fences, no \
+commentary before or after.
 
 YOUR TASKS — intent, category, contextual risk, reasoning, summary, action.
 
@@ -367,14 +392,15 @@ Return only this JSON object:
 """
 
 
-def _prompt_for(pack: PolicyPack, intent_mode: str) -> str:
+def _prompt_for(pack: PolicyPack, intent_mode: str, has_keywords: bool = False) -> str:
     pack_json = _canonical_pack_payload(pack.categories, pack.unknown_label, intent_mode)
     fp = fingerprint_pack(pack.categories, pack.unknown_label, intent_mode)
-    return build_system_prompt(fp, intent_mode, pack_json)
+    prompt = build_system_prompt(fp, intent_mode, pack_json)
+    return prompt
 
 
 @lru_cache(maxsize=64)
-def build_response_schema(fingerprint: str, intent_mode: str, category_enum_json: str) -> dict:
+def build_response_schema(fingerprint: str, intent_mode: str, category_enum_json: str, has_keywords: bool = False) -> dict:
     del fingerprint
     category_enum = json.loads(category_enum_json)
     properties: dict = {
@@ -398,6 +424,25 @@ def build_response_schema(fingerprint: str, intent_mode: str, category_enum_json
         required.append("intent_label")
     else:
         properties["intent"] = {"type": "string", "enum": sorted(_ALLOWED_INTENTS)}
+        
+    properties["keyword_context"] = {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "keyword": {"type": "string"},
+                "matched": {"type": "boolean"},
+                "contextually_relevant": {"type": "boolean"},
+                "usage": {"type": "string"},
+                "reason": {"type": "string"}
+            },
+            "required": ["keyword", "matched", "contextually_relevant", "usage", "reason"]
+        }
+    }
+    
+    if has_keywords:
+        required.append("keyword_context")
+        
     return {
         "type": "object",
         "properties": properties,
@@ -405,10 +450,10 @@ def build_response_schema(fingerprint: str, intent_mode: str, category_enum_json
     }
 
 
-def _schema_for(pack: PolicyPack, intent_mode: str) -> dict:
+def _schema_for(pack: PolicyPack, intent_mode: str, has_keywords: bool = False) -> dict:
     fp = fingerprint_pack(pack.categories, pack.unknown_label, intent_mode)
     return build_response_schema(
-        fp, intent_mode, json.dumps(sorted(pack.category_ids()))
+        fp, intent_mode, json.dumps(sorted(pack.category_ids())), has_keywords
     )
 
 
@@ -436,6 +481,7 @@ class IntelligenceResult:
     intent_label: str = ""            # enum label; equals intent in enum mode
     policy_pack_fingerprint: str = ""
     schema_enforced: bool = True
+    keyword_context: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -474,6 +520,7 @@ def _insufficient(
             pack.categories, pack.unknown_label, intent_mode
         ),
         schema_enforced=True,
+        keyword_context=[],
     )
 
 
@@ -596,7 +643,7 @@ def triage(
     return None
 
 
-def build_payload(result: dict, signals: list[str]) -> dict:
+def build_payload(result: dict, signals: list[str], matched_keywords: list[dict] | None = None) -> dict:
     """The structured user message — pipeline facts, never bare text."""
     def clip(text: str) -> str:
         limit = config.INTELLIGENCE_MAX_TEXT_CHARS
@@ -606,7 +653,7 @@ def build_payload(result: dict, signals: list[str]) -> dict:
         tail = text[-int(limit * 0.3) :]
         return f"{head}\n...[truncated]...\n{tail}"
 
-    return {
+    payload = {
         "original_text": clip(str(result.get("post_text") or "")),
         "language": result.get("language"),
         "english_text": clip(str(result.get("english_text") or "")),
@@ -620,6 +667,9 @@ def build_payload(result: dict, signals: list[str]) -> dict:
         "transliterated_text": clip(str(result.get("transliterated_text") or "")),
         "signals": signals,
     }
+    if matched_keywords:
+        payload["matched_keywords"] = matched_keywords
+    return payload
 
 
 # --------------------------------------------------------------------------- #
@@ -846,6 +896,7 @@ class IntelligenceAnalyzer:
         pack: PolicyPack | None = None,
         intent_mode: str = "enum",
         timeout_s: float | None = None,
+        matched_keywords: list[dict] | None = None,
     ) -> IntelligenceResult:
         """Never raises — every failure becomes an 'insufficient evidence' record."""
         pack = pack or DEFAULT_POLICY_PACK
@@ -857,12 +908,12 @@ class IntelligenceAnalyzer:
         if short_circuit is not None:
             return short_circuit
 
-        system_prompt = _prompt_for(pack, intent_mode)
-        schema = _schema_for(pack, intent_mode)
+        system_prompt = _prompt_for(pack, intent_mode, has_keywords=bool(matched_keywords))
+        schema = _schema_for(pack, intent_mode, has_keywords=bool(matched_keywords))
         started = time.perf_counter()
         try:
             raw = self.provider.generate(
-                build_payload(result, signals),
+                build_payload(result, signals, matched_keywords=matched_keywords),
                 system_prompt=system_prompt,
                 schema=schema,
                 timeout_s=timeout_s,
@@ -895,6 +946,7 @@ class IntelligenceAnalyzer:
         pack: PolicyPack | None = None,
         intent_mode: str = "enum",
         timeout_s: float | None = None,
+        matched_keywords: list[list[dict]] | None = None,
     ) -> list[IntelligenceResult]:
         """Order-preserving. Duplicate posts share one provider call."""
         if not results:
@@ -930,8 +982,9 @@ class IntelligenceAnalyzer:
         computed: dict[int, IntelligenceResult] = {}
 
         def _run(j: int) -> IntelligenceResult:
+            mks = matched_keywords[j] if matched_keywords and j < len(matched_keywords) else None
             return self.analyze_one(
-                results[j], pack=pack, intent_mode=intent_mode, timeout_s=timeout_s,
+                results[j], pack=pack, intent_mode=intent_mode, timeout_s=timeout_s, matched_keywords=mks
             )
 
         if workers == 1:
@@ -1014,6 +1067,10 @@ class IntelligenceAnalyzer:
         if not summary:
             summary = "No summary was produced for this post."
 
+        keyword_context = []
+        if isinstance(raw.get("keyword_context"), list):
+            keyword_context = raw["keyword_context"]
+
         return IntelligenceResult(
             category=category,
             intent=intent,
@@ -1028,6 +1085,7 @@ class IntelligenceAnalyzer:
             policy_pack_fingerprint=fingerprint_pack(
                 pack.categories, pack.unknown_label, intent_mode
             ),
+            keyword_context=keyword_context,
         )
 
     def close(self) -> None:

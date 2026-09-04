@@ -228,11 +228,17 @@ class PolicyPackModel(BaseModel):
     categories: list[PolicyCategoryModel]
 
 
+class MatchedKeywordModel(BaseModel):
+    keyword: str
+    weight: int
+
+
 class AnalyzeRequest(BaseModel):
     texts: list[str]
     # Optional intelligence knobs — ignored by /analyze; used by /analyze/intelligence.
     # Omitting every one reproduces the pre-policy-pack behaviour exactly.
     policy_pack: Optional[PolicyPackModel] = None
+    matched_keywords: Optional[list[list[MatchedKeywordModel]]] = None
     intent_mode: Literal["enum", "free"] = "enum"
     timeout_s: Optional[float] = None
 
@@ -585,7 +591,14 @@ def analyze_intelligence(req: AnalyzeRequest):
     started = time.perf_counter()
     try:
         records = _analyzer.analyze_batch(
-            payloads, pack=pack, intent_mode=intent_mode, timeout_s=timeout_s,
+            payloads,
+            pack=pack,
+            intent_mode=intent_mode,
+            timeout_s=timeout_s,
+            matched_keywords=[
+                [kw.model_dump() for kw in (mks or [])]
+                for mks in (req.matched_keywords or [])
+            ] if req.matched_keywords else None,
         )
     except OllamaGateFull as exc:
         raise HTTPException(
