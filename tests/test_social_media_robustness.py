@@ -387,8 +387,8 @@ class TraceabilityAndFallbackMetadataTests(unittest.TestCase):
         self.assertTrue(finalized.low_confidence)
         self.assertTrue(finalized.review_recommended)
 
-    def test_ollama_fallback_marks_backend_without_dropping_original(self):
-        from src.pipeline_fallback import OllamaPipelineFallback
+    def test_vllm_fallback_marks_backend_without_dropping_original(self):
+        from src.pipeline_fallback import LlmPipelineFallback
 
         class FakeProvider:
             def generate(self, payload, **kwargs):
@@ -399,7 +399,7 @@ class TraceabilityAndFallbackMetadataTests(unittest.TestCase):
                 }
 
             def describe(self):
-                return {"provider": "ollama"}
+                return {"provider": "vllm"}
 
         failure = pipeline.PipelineFailure(
             post_text="Jis kisi ki namaz nahi hui",
@@ -409,12 +409,12 @@ class TraceabilityAndFallbackMetadataTests(unittest.TestCase):
             reason="TranslationOutputError",
             translation_time_ms=7.5,
         )
-        result = OllamaPipelineFallback(
+        result = LlmPipelineFallback(
             provider=FakeProvider(), timeout_s=5
         ).resolve(failure)
         self.assertEqual("Jis kisi ki namaz nahi hui", result.post_text)
         self.assertTrue(result.fallback_used)
-        self.assertEqual("ollama_fallback", result.translation_backend)
+        self.assertEqual("vllm_fallback", result.translation_backend)
         self.assertEqual("TranslationOutputError", result.fallback_reason)
         self.assertEqual("Neutral", result.sentiment)
 

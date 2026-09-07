@@ -1,9 +1,9 @@
-"""Process-wide Ollama admission control.
+"""Process-wide LLM admission control for vLLM (and similar) backends.
 
 All intelligence and pipeline-fallback calls share one semaphore sized to the
-GPU's NUM_PARALLEL slots. When the gate is full the caller fails immediately
-(HTTP 429) instead of waiting minutes inside Ollama's FIFO. A consecutive-
-failure circuit breaker opens so a sick GPU can recover.
+backend's parallel-slot budget. When the gate is full the caller fails
+immediately (HTTP 429) instead of queueing unboundedly. A consecutive-failure
+circuit breaker opens so a sick backend can recover.
 """
 from __future__ import annotations
 
@@ -15,26 +15,28 @@ from typing import Iterator
 
 import config
 
-logger = __import__("logging").getLogger("benchmark.ollama_gate")
+logger = __import__("logging").getLogger("benchmark.llm_gate")
 
 
-class OllamaGateFull(RuntimeError):
-    """No GPU slot available right now — caller should back off."""
+class LlmGateFull(RuntimeError):
+    """No LLM slot available right now — caller should back off."""
 
-    def __init__(self, retry_after_s: float = 5.0, message: str = "Ollama gate is full") -> None:
+    def __init__(self, retry_after_s: float = 5.0, message: str = "LLM gate is full") -> None:
         super().__init__(message)
         self.retry_after_s = max(1.0, float(retry_after_s))
 
 
-class OllamaCircuitOpen(RuntimeError):
-    """Too many recent Ollama failures — stop sending until cooldown."""
+class LlmCircuitOpen(RuntimeError):
+    """Too many recent LLM failures — stop sending until cooldown."""
 
-    def __init__(self, retry_after_s: float = 30.0, message: str = "Ollama circuit is open") -> None:
+    def __init__(
+        self, retry_after_s: float = 30.0, message: str = "LLM circuit is open"
+    ) -> None:
         super().__init__(message)
         self.retry_after_s = max(1.0, float(retry_after_s))
 
 
-class OllamaGate:
+class LlmGate:
     def __init__(
         self,
         *,
@@ -43,17 +45,17 @@ class OllamaGate:
         cooldown_s: float | None = None,
         latency_window: int = 50,
     ) -> None:
-        self.size = max(1, int(size if size is not None else config.OLLAMA_GATE_SIZE))
+        self.size = max(1, int(size if size is not None else config.VLLM_GATE_SIZE))
         self.failure_threshold = max(
             2,
             int(
                 failure_threshold
                 if failure_threshold is not None
-                else config.OLLAMA_CIRCUIT_FAILURES
+                else config.VLLM_CIRCUIT_FAILURES
             ),
         )
         configured_cooldown = (
-            cooldown_s if cooldown_s is not None else config.OLLAMA_CIRCUIT_COOLDOWN_S
+            cooldown_s if cooldown_s is not None else config.VLLM_CIRCUIT_COOLDOWN_S
         )
         self.cooldown_s = max(0.05, float(configured_cooldown))
         self._lock = threading.Lock()
@@ -87,24 +89,24 @@ class OllamaGate:
             if state == "open":
                 remaining = max(1.0, self.cooldown_s - (now - self._opened_at))
                 self._rejected += 1
-                raise OllamaCircuitOpen(
+                raise LlmCircuitOpen(
                     retry_after_s=remaining,
-                    message=f"Ollama circuit open — retry after {remaining:.0f}s",
+                    message=f"LLM circuit open — retry after {remaining:.0f}s",
                 )
             if state == "half_open":
                 if self._half_open_probe or self._in_flight > 0:
                     self._rejected += 1
-                    raise OllamaCircuitOpen(
+                    raise LlmCircuitOpen(
                         retry_after_s=5.0,
-                        message="Ollama circuit half-open — probe already in flight",
+                        message="LLM circuit half-open — probe already in flight",
                     )
                 self._half_open_probe = True
             elif self._in_flight >= self.size:
                 self._rejected += 1
-                raise OllamaGateFull(
+                raise LlmGateFull(
                     retry_after_s=5.0,
                     message=(
-                        f"Ollama gate full ({self._in_flight}/{self.size} in flight)"
+                        f"LLM gate full ({self._in_flight}/{self.size} in flight)"
                     ),
                 )
             self._in_flight += 1
@@ -132,7 +134,7 @@ class OllamaGate:
             if self._consecutive_failures >= self.failure_threshold and self._opened_at <= 0:
                 self._opened_at = time.monotonic()
                 logger.warning(
-                    "Ollama circuit OPEN after %d consecutive failures (cooldown %.0fs)",
+                    "LLM circuit OPEN after %d consecutive failures (cooldown %.0fs)",
                     self._consecutive_failures,
                     self.cooldown_s,
                 )
@@ -160,7 +162,10 @@ class OllamaGate:
             if lat:
                 ordered = sorted(lat)
                 p50 = round(ordered[len(ordered) // 2], 1)
-                p95 = round(ordered[min(len(ordered) - 1, int(0.95 * (len(ordered) - 1)))], 1)
+                p95 = round(
+                    ordered[min(len(ordered) - 1, int(0.95 * (len(ordered) - 1)))],
+                    1,
+                )
             return {
                 "size": self.size,
                 "in_flight": self._in_flight,
@@ -178,17 +183,17 @@ class OllamaGate:
             }
 
 
-_GATE: OllamaGate | None = None
+_GATE: LlmGate | None = None
 _GATE_LOCK = threading.Lock()
 
 
-def get_ollama_gate() -> OllamaGate:
+def get_llm_gate() -> LlmGate:
     global _GATE
     with _GATE_LOCK:
         if _GATE is None:
-            _GATE = OllamaGate()
+            _GATE = LlmGate()
             logger.info(
-                "Ollama gate ready: size=%d circuit_failures=%d cooldown=%.0fs",
+                "LLM gate ready: size=%d circuit_failures=%d cooldown=%.0fs",
                 _GATE.size,
                 _GATE.failure_threshold,
                 _GATE.cooldown_s,
@@ -196,9 +201,9 @@ def get_ollama_gate() -> OllamaGate:
         return _GATE
 
 
-def reset_ollama_gate_for_tests() -> OllamaGate:
+def reset_llm_gate_for_tests() -> LlmGate:
     """Test helper — replace the singleton."""
     global _GATE
     with _GATE_LOCK:
-        _GATE = OllamaGate()
+        _GATE = LlmGate()
         return _GATE

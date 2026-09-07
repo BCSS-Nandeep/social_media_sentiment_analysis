@@ -82,7 +82,7 @@ class PipelineResult:
 
 @dataclass
 class PipelineFailure:
-    """Recoverable per-post failure for the API's Ollama fallback."""
+    """Recoverable per-post failure for the API's vLLM fallback."""
 
     post_text: str
     language: str

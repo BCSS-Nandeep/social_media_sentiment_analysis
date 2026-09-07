@@ -11,7 +11,7 @@ part deterministic classifiers cannot do: reading the translated text in context
 and producing an analyst-facing judgement.
 
 Callers may optionally supply a *policy pack* (category allowlist + definitions)
-so the prompt and Ollama JSON schema are built for that taxonomy. Omitting the
+so the prompt and vLLM JSON schema are built for that taxonomy. Omitting the
 pack reproduces the built-in CATEGORY_LABELS behaviour exactly.
 """
 from __future__ import annotations
@@ -28,10 +28,10 @@ from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 
 import config
-from src.ollama_gate import (
-    OllamaCircuitOpen,
-    OllamaGateFull,
-    get_ollama_gate,
+from src.llm_gate import (
+    LlmCircuitOpen,
+    LlmGateFull,
+    get_llm_gate,
 )
 from src.script_detection import LATIN_RANGE, UNICODE_RANGES
 
@@ -497,7 +497,7 @@ def _insufficient(
     action: str = "Human Review",
 ) -> IntelligenceResult:
     """The mandated shape for 'not enough evidence' — used by both triage and
-    every failure path, so an unreadable post and an unreachable Ollama produce
+    every failure path, so an unreadable post and an unreachable vLLM produce
     records a consumer can treat identically."""
     pack = pack or DEFAULT_POLICY_PACK
     unknown = pack.unknown_label
@@ -581,7 +581,7 @@ def derive_signals(result: dict) -> list[str]:
     if result.get("was_transliterated"):
         signals.append("romanized_indic_transliterated")
     if result.get("fallback_used"):
-        signals.append("ollama_pipeline_fallback")
+        signals.append("vllm_pipeline_fallback")
     if result.get("translation_truncated"):
         signals.append("translation_truncated")
     if result.get("sentiment_truncated"):
@@ -705,18 +705,19 @@ class IntelligenceProvider(ABC):
         return None
 
 
-class OllamaProvider(IntelligenceProvider):
-    """Ollama /api/chat, constrained to the response schema where supported."""
+class VLLMProvider(IntelligenceProvider):
+    """vLLM OpenAI-compatible /v1/chat/completions client."""
 
-    name = "ollama"
+    name = "vllm"
 
     def __init__(
         self,
-        base_url: str = config.OLLAMA_BASE_URL,
-        model: str = config.OLLAMA_MODEL,
-        timeout_s: float = config.OLLAMA_TIMEOUT_S,
-        retries: int = config.OLLAMA_RETRIES,
-        use_schema: bool = config.OLLAMA_JSON_SCHEMA,
+        base_url: str = config.VLLM_BASE_URL,
+        model: str = config.VLLM_MODEL,
+        timeout_s: float = config.VLLM_TIMEOUT_S,
+        retries: int = config.VLLM_RETRIES,
+        use_schema: bool = config.VLLM_JSON_SCHEMA,
+        api_key: str = config.VLLM_API_KEY,
     ) -> None:
         import requests
 
@@ -724,9 +725,12 @@ class OllamaProvider(IntelligenceProvider):
         self.model = model
         self.timeout_s = timeout_s
         self.retries = max(0, retries)
+        self.api_key = (api_key or "").strip()
         self._use_schema = use_schema
         self._session = requests.Session()
         self._lock = threading.Lock()
+        if self.api_key:
+            self._session.headers["Authorization"] = f"Bearer {self.api_key}"
 
     def describe(self) -> dict:
         return {
@@ -735,7 +739,8 @@ class OllamaProvider(IntelligenceProvider):
             "model": self.model,
             "timeout_s": self.timeout_s,
             "json_schema": self._use_schema,
-            "num_predict": config.OLLAMA_NUM_PREDICT,
+            "max_tokens": config.VLLM_MAX_TOKENS,
+            "auth_configured": bool(self.api_key),
             "default_policy_pack_fingerprint": DEFAULT_POLICY_PACK.fingerprint,
         }
 
@@ -744,10 +749,10 @@ class OllamaProvider(IntelligenceProvider):
 
     def health(self) -> bool:
         try:
-            response = self._session.get(f"{self.base_url}/api/tags", timeout=5)
+            response = self._session.get(f"{self.base_url}/models", timeout=5)
             return response.status_code == 200
         except Exception as exc:
-            logger.warning("Ollama health check failed for %s: %s", self.base_url, exc)
+            logger.warning("vLLM health check failed for %s: %s", self.base_url, exc)
             return False
 
     def _body(
@@ -764,15 +769,21 @@ class OllamaProvider(IntelligenceProvider):
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
             "stream": False,
-            "keep_alive": config.OLLAMA_KEEP_ALIVE,
-            "options": {
-                "temperature": config.OLLAMA_TEMPERATURE,
-                "num_ctx": config.OLLAMA_NUM_CTX,
-                "num_predict": config.OLLAMA_NUM_PREDICT,
-                "seed": config.SEED,
-            },
+            "temperature": config.VLLM_TEMPERATURE,
+            "max_tokens": config.VLLM_MAX_TOKENS,
+            "seed": config.SEED,
         }
-        body["format"] = schema if use_schema else "json"
+        if use_schema:
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "structured_response",
+                    "schema": schema,
+                    "strict": True,
+                },
+            }
+        else:
+            body["response_format"] = {"type": "json_object"}
         return body
 
     def generate(
@@ -785,42 +796,47 @@ class OllamaProvider(IntelligenceProvider):
     ) -> dict:
         timeout = self.timeout_s if timeout_s is None else timeout_s
         last_error: Exception | None = None
-        gate = get_ollama_gate()
+        gate = get_llm_gate()
         with gate.slot():
             for attempt in range(self.retries + 1):
                 use_schema = self._use_schema
                 try:
                     response = self._session.post(
-                        f"{self.base_url}/api/chat",
+                        f"{self.base_url}/chat/completions",
                         json=self._body(payload, use_schema, system_prompt, schema),
                         timeout=timeout,
                     )
-                    if use_schema and response.status_code == 400:
+                    if use_schema and response.status_code in (400, 422):
                         with self._lock:
                             if self._use_schema:
                                 logger.warning(
-                                    "Ollama at %s rejected a JSON schema (400) — falling "
-                                    "back to format=\"json\" for the rest of this process.",
+                                    "vLLM at %s rejected json_schema (%s) — falling "
+                                    "back to response_format=json_object for the rest "
+                                    "of this process.",
                                     self.base_url,
+                                    response.status_code,
                                 )
                                 self._use_schema = False
                         response = self._session.post(
-                            f"{self.base_url}/api/chat",
+                            f"{self.base_url}/chat/completions",
                             json=self._body(payload, False, system_prompt, schema),
                             timeout=timeout,
                         )
                     response.raise_for_status()
-                    content = response.json().get("message", {}).get("content", "")
+                    choices = response.json().get("choices") or []
+                    if not choices:
+                        raise ValueError("vLLM response contained no choices")
+                    content = choices[0].get("message", {}).get("content", "")
                     return _parse_json_object(content)
                 except Exception as exc:
                     last_error = exc
                     if attempt < self.retries:
                         logger.warning(
-                            "Ollama attempt %d/%d failed (%s) — retrying.",
+                            "vLLM attempt %d/%d failed (%s) — retrying.",
                             attempt + 1, self.retries + 1, exc,
                         )
             raise RuntimeError(
-                f"Ollama request failed after {self.retries + 1} attempt(s): {last_error}"
+                f"vLLM request failed after {self.retries + 1} attempt(s): {last_error}"
             )
 
     def close(self) -> None:
@@ -831,7 +847,7 @@ class OllamaProvider(IntelligenceProvider):
 
 
 PROVIDERS: dict[str, type[IntelligenceProvider]] = {
-    OllamaProvider.name: OllamaProvider,
+    VLLMProvider.name: VLLMProvider,
 }
 
 
@@ -867,7 +883,7 @@ class IntelligenceAnalyzer:
     """Turns pipeline results into intelligence records.
 
     Stateless per call and safe to share across threads. Batches fan out across
-    ``OLLAMA_CONCURRENCY`` workers; identical posts within a batch are analyzed
+    ``VLLM_CONCURRENCY`` workers; identical posts within a batch are analyzed
     once and the record reused.
     """
 
@@ -918,7 +934,7 @@ class IntelligenceAnalyzer:
                 schema=schema,
                 timeout_s=timeout_s,
             )
-        except (OllamaGateFull, OllamaCircuitOpen):
+        except (LlmGateFull, LlmCircuitOpen):
             raise
         except Exception as exc:
             logger.error("Intelligence provider failed: %s", exc)
@@ -976,7 +992,7 @@ class IntelligenceAnalyzer:
 
         workers = max(
             1,
-            min(config.OLLAMA_CONCURRENCY, get_ollama_gate().size, len(todo)),
+            min(config.VLLM_CONCURRENCY, get_llm_gate().size, len(todo)),
         )
         started = time.perf_counter()
         computed: dict[int, IntelligenceResult] = {}

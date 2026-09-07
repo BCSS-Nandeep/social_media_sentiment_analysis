@@ -1,4 +1,4 @@
-"""Bounded FIFO worker queue for Ollama pipeline fallback calls."""
+"""Bounded FIFO worker queue for vLLM pipeline fallback calls."""
 from __future__ import annotations
 
 import threading
@@ -76,7 +76,7 @@ class BoundedWorkQueue:
             with self._condition:
                 self._rejected += len(jobs)
             raise FallbackQueueFull(
-                "Ollama fallback batch exceeds queue capacity"
+                "vLLM fallback batch exceeds queue capacity"
             )
 
         deadline = time.monotonic() + max(0.0, float(timeout_s))
@@ -88,7 +88,7 @@ class BoundedWorkQueue:
                 if remaining <= 0:
                     self._rejected += len(jobs)
                     raise FallbackQueueFull(
-                        "Ollama fallback queue is at capacity"
+                        "vLLM fallback queue is at capacity"
                     )
                 self._condition.wait(remaining)
             if self._stopped:

@@ -1,4 +1,4 @@
-"""Schema-compatible Ollama fallback for recoverable pipeline failures."""
+"""Schema-compatible vLLM fallback for recoverable pipeline failures."""
 from __future__ import annotations
 
 import math
@@ -6,8 +6,8 @@ import time
 from collections.abc import Callable
 
 import config
-from src.intelligence import OllamaProvider
-from src.ollama_gate import OllamaCircuitOpen, OllamaGateFull
+from src.intelligence import VLLMProvider
+from src.llm_gate import LlmCircuitOpen, LlmGateFull
 from src.pipeline import PipelineFailure, PipelineResult, annotate_result_quality
 from src.translation import translation_is_usable
 
@@ -49,17 +49,17 @@ alerting, recommendations, or any other task. Do not add fields."""
 
 
 class PipelineFallbackError(RuntimeError):
-    """Ollama could not produce a contract-safe pipeline result."""
+    """vLLM could not produce a contract-safe pipeline result."""
 
 
-class OllamaPipelineFallback:
+class LlmPipelineFallback:
     def __init__(
         self,
-        provider: OllamaProvider | None = None,
+        provider: VLLMProvider | None = None,
         timeout_s: float = config.PIPELINE_FALLBACK_TIMEOUT_S,
         english_validator: Callable[[str], bool] | None = None,
     ) -> None:
-        self.provider = provider or OllamaProvider(
+        self.provider = provider or VLLMProvider(
             timeout_s=timeout_s,
             retries=0,
         )
@@ -70,7 +70,7 @@ class OllamaPipelineFallback:
         provider = self.provider.describe()
         return {
             "enabled": config.PIPELINE_FALLBACK_ENABLED,
-            "provider": provider.get("provider", "ollama"),
+            "provider": provider.get("provider", "vllm"),
             "base_url": provider.get("base_url"),
             "model": provider.get("model"),
             "json_schema": provider.get("json_schema", True),
@@ -99,11 +99,11 @@ class OllamaPipelineFallback:
             english_text, sentiment, confidence = self._validate(
                 response, failure
             )
-        except (PipelineFallbackError, OllamaGateFull, OllamaCircuitOpen):
+        except (PipelineFallbackError, LlmGateFull, LlmCircuitOpen):
             raise
         except Exception as exc:
             raise PipelineFallbackError(
-                f"Ollama pipeline fallback failed: {type(exc).__name__}"
+                f"vLLM pipeline fallback failed: {type(exc).__name__}"
             ) from exc
 
         fallback_ms = (time.perf_counter() - started) * 1000.0
@@ -126,7 +126,7 @@ class OllamaPipelineFallback:
                 translation_time_ms=translation_ms,
                 sentiment_time_ms=0.0,
                 total_time_ms=translation_ms,
-                translation_backend="ollama_fallback",
+                translation_backend="vllm_fallback",
                 fallback_used=True,
                 fallback_reason=failure.reason,
             )
@@ -137,37 +137,37 @@ class OllamaPipelineFallback:
         response: object, failure: PipelineFailure
     ) -> tuple[str, str, float]:
         if not isinstance(response, dict):
-            raise PipelineFallbackError("Ollama fallback response is not an object")
+            raise PipelineFallbackError("vLLM fallback response is not an object")
         if frozenset(response) != EXPECTED_FIELDS:
             raise PipelineFallbackError(
-                "Ollama fallback response fields do not match the contract"
+                "vLLM fallback response fields do not match the contract"
             )
 
         english_text = response["english_text"]
         sentiment = response["sentiment"]
         confidence = response["confidence"]
         if not isinstance(english_text, str) or not english_text.strip():
-            raise PipelineFallbackError("Ollama fallback translation is empty")
+            raise PipelineFallbackError("vLLM fallback translation is empty")
         english_text = english_text.strip()
         if sentiment not in ALLOWED_SENTIMENTS:
-            raise PipelineFallbackError("Ollama fallback sentiment is invalid")
+            raise PipelineFallbackError("vLLM fallback sentiment is invalid")
         if (
             isinstance(confidence, bool)
             or not isinstance(confidence, (int, float))
             or not math.isfinite(float(confidence))
             or not 0.0 <= float(confidence) <= 1.0
         ):
-            raise PipelineFallbackError("Ollama fallback confidence is invalid")
+            raise PipelineFallbackError("vLLM fallback confidence is invalid")
         if failure.language != "en" and not translation_is_usable(
             failure.post_text, english_text
         ):
-            raise PipelineFallbackError("Ollama fallback translation is unusable")
+            raise PipelineFallbackError("vLLM fallback translation is unusable")
         if (
             failure.language != "en"
             and self.english_validator is not None
             and not self.english_validator(english_text)
         ):
             raise PipelineFallbackError(
-                "Ollama fallback output was not verified as English"
+                "vLLM fallback output was not verified as English"
             )
         return english_text, sentiment, float(confidence)

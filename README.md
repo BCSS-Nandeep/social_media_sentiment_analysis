@@ -62,7 +62,7 @@ catch and correct that before the bypass decision is made.
           99.892%                      0.107%
              │                           │
              ▼                           ▼
-       Sentiment ready             Ollama fallback
+       Sentiment ready             vLLM fallback
              │                           │
              │                           ▼
              │                 Translation / Sentiment
@@ -70,7 +70,7 @@ catch and correct that before the bypass decision is made.
              └──────────────┬────────────┘
                             │
                             ▼
-                    Ollama Intelligence
+                    vLLM Intelligence
                             │
                             ▼
                       Extra Metrics
@@ -276,9 +276,9 @@ Defaults are far above ordinary traffic and are env-overridable:
 | `SENTIMENT_INFERENCE_HARD_TIMEOUT_S` | 120 | Hard deadline for each model-generation call. The process exits with code 70 so PM2 can restart it if a model or CUDA call cannot return to Python. Set 0 only for non-production debugging. |
 | `SENTIMENT_TRANSLATION_OUTPUT_MAX_RATIO` | 4.0 | Rejects implausibly expanded primary translations and sends them to NLLB. |
 | `SENTIMENT_TRANSLATION_REPEAT_TOKEN_RATIO` | 0.5 | Rejects repetitive decode loops when one token dominates an output of at least eight tokens. |
-| `SENTIMENT_PIPELINE_FALLBACK_ENABLED` | true | Sends only recoverable deterministic translation/sentiment failures to Ollama after releasing the GPU inference lock. |
-| `SENTIMENT_PIPELINE_FALLBACK_TIMEOUT_S` | 60 | Timeout for the schema-constrained Ollama fallback call. Provider failure returns HTTP 503 for retry. |
-| `SENTIMENT_PIPELINE_FALLBACK_MAX_WORKERS` | 2 | Service-wide Ollama fallback workers consuming the FIFO queue. |
+| `SENTIMENT_PIPELINE_FALLBACK_ENABLED` | true | Sends only recoverable deterministic translation/sentiment failures to vLLM after releasing the GPU inference lock. |
+| `SENTIMENT_PIPELINE_FALLBACK_TIMEOUT_S` | 60 | Timeout for the schema-constrained vLLM fallback call. Provider failure returns HTTP 503 for retry. |
+| `SENTIMENT_PIPELINE_FALLBACK_MAX_WORKERS` | 2 | Service-wide vLLM fallback workers consuming the FIFO queue. |
 | `SENTIMENT_PIPELINE_FALLBACK_QUEUE_CAPACITY` | 64 | Maximum pending fallback jobs across all requests. |
 | `SENTIMENT_PIPELINE_FALLBACK_QUEUE_TIMEOUT_S` | 2 | Maximum wait to enqueue fallback work before returning HTTP 503. |
 | `SENTIMENT_TORCH_NUM_THREADS` | 0 (torch default) | CPU intra-op threads. Worth setting explicitly in a CPU deployment: torch sizes its default from the *visible* core count, so inside a cgroup-limited container it oversubscribes and contends. The effective value is logged at startup either way. |
@@ -291,20 +291,20 @@ The production process manager must have automatic restart enabled: the hard
 watchdog deliberately terminates a process that cannot release the inference
 lock.
 
-### Ollama pipeline fallback
+### vLLM pipeline fallback
 
 The deterministic stack remains authoritative. If IndicTrans2 and NLLB cannot
 produce usable English, or the sentiment classifier fails, the service isolates
-the failed post and calls Ollama only after releasing the GPU inference lock.
-Successful neighbors in the same batch are not sent to Ollama.
+the failed post and calls vLLM only after releasing the GPU inference lock.
+Successful neighbors in the same batch are not sent to vLLM.
 
 Fallback work enters one bounded, process-wide FIFO queue. A fixed worker pool
-limits Ollama concurrency across all requests; the queue never grows without
+limits vLLM concurrency across all requests; the queue never grows without
 bound. Saturated submissions wait for the configured enqueue timeout and then
 return HTTP 503. `/health.pipeline_fallback.queue` reports active, queued,
 accepted, rejected, cancelled, and completed counts.
 
-Ollama is constrained to return exactly `english_text`, `sentiment`, and
+vLLM is constrained to return exactly `english_text`, `sentiment`, and
 `confidence`. The service rejects additional/missing fields, sentiment outside
 `Positive | Neutral | Negative`, invalid confidence, and unusable translations.
 It constructs the normal result metadata and timing fields itself, so
@@ -338,14 +338,14 @@ It does not replace, bypass or duplicate any pipeline stage.
                         was_translated, was_transliterated  (trusted facts)
                     │
                     ▼
-              Ollama (guard-railed)
+              vLLM (guard-railed)
                     │
                     ▼
    intent | category | risk_score | reasoning | summary | recommended_action
 ```
 
 **The deterministic pipeline owns** language detection, transliteration,
-translation, sentiment and confidence. **Ollama never recomputes any of them** —
+translation, sentiment and confidence. **vLLM never recomputes any of them** —
 the system prompt in [src/intelligence.py](src/intelligence.py) forbids it
 explicitly, and those values are passed in as established facts.
 
@@ -366,7 +366,7 @@ Optional request fields (all ignored by `/analyze`):
 | --- | --- | --- |
 | `policy_pack` | built-in taxonomy | Caller category allowlist (`id` + optional `definition`/`severity`/`keywords`), plus `unknown_label` |
 | `intent_mode` | `enum` | `enum` = fixed intent labels; `free` = 2–8 word phrase + `intent_label` enum |
-| `timeout_s` | `OLLAMA_TIMEOUT_S` | Per-request Ollama timeout override (clamped to 5–600) |
+| `timeout_s` | `VLLM_TIMEOUT_S` | Per-request vLLM timeout override (clamped to 5–600) |
 
 Example with a SOCKEYE-style pack:
 
@@ -401,7 +401,7 @@ Each result carries every `/analyze` key plus an `intelligence` object:
     "reasoning": "...", "summary": "...", "recommended_action": "Monitor",
     "evidence_confidence": "high",
     "signals": ["code_mixed"], "source": "provider",
-    "model": "qwen2.5:7b", "latency_ms": 1840.2,
+    "model": "Qwen3-14B-AWQ", "latency_ms": 1840.2,
     "policy_pack_fingerprint": "sha256:…",
     "schema_enforced": true
   }
@@ -414,7 +414,7 @@ Each result carries every `/analyze` key plus an `intelligence` object:
 Both output sets belong in the stored analysis record. `predict.py --intelligence`
 writes them as columns alongside the sentiment columns.
 
-Contract checks (no Ollama required):
+Contract checks (no live vLLM required):
 
 ```bash
 python verify_intelligence_contract.py
@@ -424,19 +424,19 @@ python verify_intelligence_contract.py
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama host — point at your other server |
-| `OLLAMA_MODEL` | `llama3.1:8b` | Model tag |
-| `OLLAMA_TIMEOUT_S` | 120 | Per-request timeout |
-| `OLLAMA_RETRIES` | 0 | In-process Ollama retries (0 = caller owns retry) |
-| `OLLAMA_CONCURRENCY` | 2 | Parallel calls per batch (capped by gate size) |
-| `OLLAMA_GATE_SIZE` | 2 | Process-wide in-flight cap (align with GPU NUM_PARALLEL) |
-| `OLLAMA_KEEP_ALIVE` | `24h` | Sent on every /api/chat so the model stays loaded |
-| `OLLAMA_CIRCUIT_FAILURES` | 8 | Consecutive failures before the circuit opens |
-| `OLLAMA_CIRCUIT_COOLDOWN_S` | 30 | How long the circuit stays open |
-| `OLLAMA_TEMPERATURE` | 0 | 0 for reproducible assessments |
-| `OLLAMA_NUM_PREDICT` | 256 | Max generation tokens |
-| `OLLAMA_JSON_SCHEMA` | 1 | Constrain decoding to the schema (Ollama ≥ 0.5); auto-downgrades if the server rejects it |
-| `SENTIMENT_INTELLIGENCE_PROVIDER` | `ollama` | Selects the provider from the registry |
+| `VLLM_BASE_URL` | `http://100.49.109.96/v1` | OpenAI-compatible vLLM base URL (include `/v1`) |
+| `VLLM_MODEL` | `Qwen3-14B-AWQ` | Served model id |
+| `VLLM_API_KEY` | _(empty)_ | Bearer token when the gateway requires auth |
+| `VLLM_TIMEOUT_S` | 120 | Per-request timeout |
+| `VLLM_RETRIES` | 0 | In-process vLLM retries (0 = caller owns retry) |
+| `VLLM_CONCURRENCY` | 2 | Parallel calls per batch (capped by gate size) |
+| `VLLM_GATE_SIZE` | 2 | Process-wide in-flight cap |
+| `VLLM_CIRCUIT_FAILURES` | 8 | Consecutive failures before the circuit opens |
+| `VLLM_CIRCUIT_COOLDOWN_S` | 30 | How long the circuit stays open |
+| `VLLM_TEMPERATURE` | 0 | 0 for reproducible assessments |
+| `VLLM_MAX_TOKENS` | 256 | Max generation tokens |
+| `VLLM_JSON_SCHEMA` | 1 | Prefer `response_format=json_schema`; auto-downgrades to `json_object` if rejected |
+| `SENTIMENT_INTELLIGENCE_PROVIDER` | `vllm` | Selects the provider from the registry |
 
 ## Guarantees
 

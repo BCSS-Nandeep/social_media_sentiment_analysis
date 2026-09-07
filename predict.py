@@ -54,7 +54,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Also run the stage-3 intelligence layer (intent, category, risk, "
             "reasoning, summary, recommended action) over the pipeline output. "
-            "Requires OLLAMA_BASE_URL to be reachable."
+            "Requires VLLM_BASE_URL (and VLLM_API_KEY if the gateway requires auth) to be reachable."
         ),
     )
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging.")

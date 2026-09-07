@@ -14,7 +14,7 @@ outputs/*
 .cache/
 .ipynb_checkpoints/
 
-# Local secrets / runtime config (HF_TOKEN, OLLAMA_*)
+# Local secrets / runtime config (HF_TOKEN, VLLM_*)
 .env
 .env.*
 !.env.example

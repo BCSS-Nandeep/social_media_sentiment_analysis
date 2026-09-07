@@ -64,7 +64,7 @@ from pydantic import BaseModel, Field
 
 import config  # loads .env (HF_TOKEN) via load_dotenv()
 from src.fallback_queue import BoundedWorkQueue, FallbackQueueFull
-from src.ollama_gate import OllamaCircuitOpen, OllamaGateFull, get_ollama_gate
+from src.llm_gate import LlmCircuitOpen, LlmGateFull, get_llm_gate
 from src.pipeline_fallback import PipelineFallbackError
 from src.translation import TranslationError
 
@@ -92,7 +92,7 @@ _request_ids = itertools.count(1)
 
 
 def _fallback_output_is_english(text: str) -> bool:
-    """Validate Ollama output with the loaded general and Roman-Indic LID."""
+    """Validate vLLM fallback output with the loaded general and Roman-Indic LID."""
     if _pipeline is None:
         return False
     if not _inference_lock.acquire(
@@ -109,7 +109,7 @@ def _fallback_output_is_english(text: str) -> bool:
             refined = _pipeline.roman_detector.detect(text)
             if refined not in (None, "en"):
                 logger.warning(
-                    "Rejected Ollama fallback output classified as Roman %s",
+                    "Rejected vLLM fallback output classified as Roman %s",
                     refined,
                 )
                 return False
@@ -150,9 +150,9 @@ async def lifespan(_app: FastAPI):
     global _pipeline_fallback, _pipeline_fallback_queue
     if config.PIPELINE_FALLBACK_ENABLED:
         try:
-            from src.pipeline_fallback import OllamaPipelineFallback
+            from src.pipeline_fallback import LlmPipelineFallback
 
-            _pipeline_fallback = OllamaPipelineFallback(
+            _pipeline_fallback = LlmPipelineFallback(
                 english_validator=_fallback_output_is_english
             )
             _pipeline_fallback_queue = BoundedWorkQueue(
@@ -171,7 +171,7 @@ async def lifespan(_app: FastAPI):
 
     # Stage 3 is optional and must never be able to take down /analyze, so it is
     # imported and constructed defensively — a missing dependency or a bad
-    # OLLAMA_BASE_URL degrades to "intelligence unavailable", not a failed boot.
+    # VLLM_BASE_URL degrades to "intelligence unavailable", not a failed boot.
     global _analyzer
     try:
         from src.intelligence import IntelligenceAnalyzer
@@ -321,7 +321,7 @@ def health():
             if _analyzer is not None
             else {"available": False}
         ),
-        "ollama_gate": get_ollama_gate().stats(),
+        "llm_gate": get_llm_gate().stats(),
         "pipeline_fallback": (
             {
                 "available": True,
@@ -404,7 +404,7 @@ def _resolve_pipeline_outcomes(outcomes: list, request_id: int) -> list:
     if _pipeline_fallback is None:
         raise PipelineFallbackError(
             f"Deterministic pipeline failed for {len(failures)} post(s) and "
-            "Ollama fallback is unavailable"
+            "vLLM fallback is unavailable"
         )
 
     unique: dict[tuple[str, str, bool], PipelineFailure] = {}
@@ -417,7 +417,7 @@ def _resolve_pipeline_outcomes(outcomes: list, request_id: int) -> list:
         unique.setdefault(key, failure)
 
     logger.warning(
-        "req %d: resolving %d deterministic failure(s) through Ollama "
+        "req %d: resolving %d deterministic failure(s) through vLLM "
         "(%d unique)",
         request_id,
         len(failures),
@@ -448,12 +448,12 @@ def _resolve_pipeline_outcomes(outcomes: list, request_id: int) -> list:
             for future in futures:
                 future.cancel()
             logger.error(
-                "req %d: Ollama fallback queue saturated (%s)",
+                "req %d: vLLM fallback queue saturated (%s)",
                 request_id,
                 _pipeline_fallback_queue.stats(),
             )
             raise PipelineFallbackError(
-                "Ollama fallback queue is at capacity"
+                "vLLM fallback queue is at capacity"
             ) from exc
         resolved = {}
         try:
@@ -518,13 +518,13 @@ def analyze(req: AnalyzeRequest):
     )
     try:
         results = _run_pipeline_with_fallback(req.texts, request_id)
-    except OllamaGateFull as e:
+    except LlmGateFull as e:
         raise HTTPException(
             status_code=429,
             detail=str(e),
             headers={"Retry-After": str(int(e.retry_after_s))},
         ) from e
-    except OllamaCircuitOpen as e:
+    except LlmCircuitOpen as e:
         raise HTTPException(
             status_code=503,
             detail=str(e),
@@ -545,7 +545,7 @@ def analyze_intelligence(req: AnalyzeRequest):
     the lock through it would block sentiment inference for no reason.
 
     Optional ``policy_pack`` / ``intent_mode`` / ``timeout_s`` customise the
-    Ollama taxonomy and timeout. Omitting them preserves legacy behaviour.
+    vLLM taxonomy and timeout. Omitting them preserves legacy behaviour.
     """
     if _pipeline is None:
         raise HTTPException(status_code=503, detail="Pipeline still loading")
@@ -553,7 +553,7 @@ def analyze_intelligence(req: AnalyzeRequest):
         raise HTTPException(
             status_code=503,
             detail=(
-                "Intelligence layer unavailable — check OLLAMA_BASE_URL and the "
+                "Intelligence layer unavailable — check VLLM_BASE_URL / VLLM_API_KEY and the "
                 "service logs. /analyze is unaffected."
             ),
         )
@@ -572,13 +572,13 @@ def analyze_intelligence(req: AnalyzeRequest):
 
     try:
         results = _run_pipeline_with_fallback(req.texts, request_id)
-    except OllamaGateFull as e:
+    except LlmGateFull as e:
         raise HTTPException(
             status_code=429,
             detail=str(e),
             headers={"Retry-After": str(int(e.retry_after_s))},
         ) from e
-    except OllamaCircuitOpen as e:
+    except LlmCircuitOpen as e:
         raise HTTPException(
             status_code=503,
             detail=str(e),
@@ -600,13 +600,13 @@ def analyze_intelligence(req: AnalyzeRequest):
                 for mks in (req.matched_keywords or [])
             ] if req.matched_keywords else None,
         )
-    except OllamaGateFull as exc:
+    except LlmGateFull as exc:
         raise HTTPException(
             status_code=429,
             detail=str(exc),
             headers={"Retry-After": str(int(exc.retry_after_s))},
         ) from exc
-    except OllamaCircuitOpen as exc:
+    except LlmCircuitOpen as exc:
         raise HTTPException(
             status_code=503,
             detail=str(exc),

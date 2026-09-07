@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contract checks for the intelligence policy-pack API (no live Ollama required).
+"""Contract checks for the intelligence policy-pack API (no live vLLM required).
 
 Asserts:
   * schema is built from the supplied pack

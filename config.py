@@ -215,7 +215,7 @@ INFERENCE_HARD_TIMEOUT_S: float = float(
     os.getenv("SENTIMENT_INFERENCE_HARD_TIMEOUT_S", "120")
 )
 
-# Recoverable deterministic failures can be normalized through Ollama after the
+# Recoverable deterministic failures can be normalized through vLLM after the
 # GPU inference lock is released. This is deliberately separate from the later
 # intelligence/policy-mapping stage.
 PIPELINE_FALLBACK_ENABLED: bool = os.getenv(
@@ -235,7 +235,7 @@ PIPELINE_FALLBACK_QUEUE_TIMEOUT_S: float = max(
 )
 
 # --------------------------------------------------------------------------- #
-# Stage 3 — intelligence layer (Ollama)
+# Stage 3 — intelligence layer (vLLM OpenAI-compatible API)
 # --------------------------------------------------------------------------- #
 # A SECOND stage that consumes the deterministic pipeline's structured output.
 # It never re-does language detection, transliteration, translation or sentiment
@@ -244,35 +244,39 @@ PIPELINE_FALLBACK_QUEUE_TIMEOUT_S: float = max(
 #
 # The provider is selected by name so further intelligence backends can be
 # registered in src/intelligence.py without touching the sentiment pipeline.
-INTELLIGENCE_PROVIDER: str = os.getenv("SENTIMENT_INTELLIGENCE_PROVIDER", "ollama")
+INTELLIGENCE_PROVIDER: str = os.getenv("SENTIMENT_INTELLIGENCE_PROVIDER", "vllm")
 
-# Ollama runs on a separate host — set OLLAMA_BASE_URL in .env to point at it.
-OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
-OLLAMA_TIMEOUT_S: float = float(os.getenv("OLLAMA_TIMEOUT_S", "120"))
+# vLLM OpenAI-compatible base URL (must include /v1).
+VLLM_BASE_URL: str = os.getenv("VLLM_BASE_URL", "http://100.49.109.96/v1").rstrip("/")
+VLLM_MODEL: str = os.getenv("VLLM_MODEL", "Qwen3-14B-AWQ")
+# Optional bearer token for gated vLLM gateways. Leave empty when the server
+# does not require auth.
+VLLM_API_KEY: str = os.getenv("VLLM_API_KEY", "").strip()
+VLLM_TIMEOUT_S: float = float(os.getenv("VLLM_TIMEOUT_S", "120"))
 # Default 0: SOCEYE / the job worker owns retries. In-process retries during an
-# outage multiply load on a 2-slot GPU.
-OLLAMA_RETRIES: int = int(os.getenv("OLLAMA_RETRIES", "0"))
+# outage multiply load on a contended backend.
+VLLM_RETRIES: int = int(os.getenv("VLLM_RETRIES", "0"))
 # Intelligence calls are network-bound and run outside the model-inference lock,
-# so a batch fans out across this many concurrent requests to the Ollama host.
-# The process-wide Ollama gate (OLLAMA_GATE_SIZE) is the real GPU cap.
-OLLAMA_CONCURRENCY: int = int(os.getenv("OLLAMA_CONCURRENCY", "2"))
-OLLAMA_TEMPERATURE: float = float(os.getenv("OLLAMA_TEMPERATURE", "0"))
-OLLAMA_NUM_CTX: int = int(os.getenv("OLLAMA_NUM_CTX", "4096"))
-# Bounds worst-case generation length (summary + intent_label add tokens vs SOCKEYE's
-# old 240-token cap). Still small enough that a degenerate decode cannot run away.
-OLLAMA_NUM_PREDICT: int = int(os.getenv("OLLAMA_NUM_PREDICT", "256"))
-# Pin the model so other apps' keep_alive=0 cannot unload it mid-batch.
-OLLAMA_KEEP_ALIVE: str = os.getenv("OLLAMA_KEEP_ALIVE", "24h").strip() or "24h"
+# so a batch fans out across this many concurrent requests to the vLLM host.
+# The process-wide LLM gate (VLLM_GATE_SIZE) is the real concurrency cap.
+VLLM_CONCURRENCY: int = int(os.getenv("VLLM_CONCURRENCY", "2"))
+VLLM_TEMPERATURE: float = float(os.getenv("VLLM_TEMPERATURE", "0"))
+# Bounds worst-case generation length (summary + intent_label). Still small
+# enough that a degenerate decode cannot run away.
+VLLM_MAX_TOKENS: int = int(os.getenv("VLLM_MAX_TOKENS", "256"))
 # Process-wide in-flight cap shared by intelligence + pipeline fallback.
-# Align with the GPU's OLLAMA_NUM_PARALLEL (iccc-s A4000 = 2).
-OLLAMA_GATE_SIZE: int = max(1, int(os.getenv("OLLAMA_GATE_SIZE", "2")))
-OLLAMA_CIRCUIT_FAILURES: int = max(2, int(os.getenv("OLLAMA_CIRCUIT_FAILURES", "8")))
-OLLAMA_CIRCUIT_COOLDOWN_S: float = max(5.0, float(os.getenv("OLLAMA_CIRCUIT_COOLDOWN_S", "30")))
-# Ollama >= 0.5 constrains generation to a JSON schema, which is far more
-# reliable than format="json" alone. Set to 0 for older servers; the provider
-# also falls back automatically if the server rejects a schema.
-OLLAMA_JSON_SCHEMA: bool = os.getenv("OLLAMA_JSON_SCHEMA", "1") not in ("0", "false", "False")
+VLLM_GATE_SIZE: int = max(1, int(os.getenv("VLLM_GATE_SIZE", "2")))
+VLLM_CIRCUIT_FAILURES: int = max(2, int(os.getenv("VLLM_CIRCUIT_FAILURES", "8")))
+VLLM_CIRCUIT_COOLDOWN_S: float = max(
+    5.0, float(os.getenv("VLLM_CIRCUIT_COOLDOWN_S", "30"))
+)
+# Prefer OpenAI-style json_schema response_format when the server supports it;
+# the provider falls back to json_object / plain JSON prompting on rejection.
+VLLM_JSON_SCHEMA: bool = os.getenv("VLLM_JSON_SCHEMA", "1") not in (
+    "0",
+    "false",
+    "False",
+)
 
 # Taxonomies. "Unknown" is always additionally permitted for category/intent —
 # the guard rails require it rather than a guess when evidence is insufficient.

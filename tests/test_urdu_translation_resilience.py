@@ -201,7 +201,7 @@ class PipelineOutcomeTests(unittest.TestCase):
         self.assertEqual([["first", "last"]], calls)
 
 
-class OllamaFallbackTests(unittest.TestCase):
+class LlmFallbackTests(unittest.TestCase):
     class FakeProvider:
         def __init__(self, response=None, error=None):
             self.response = response
@@ -215,7 +215,7 @@ class OllamaFallbackTests(unittest.TestCase):
             return self.response
 
         def describe(self):
-            return {"provider": "ollama", "model": "test-model"}
+            return {"provider": "vllm", "model": "test-model"}
 
         def health(self):
             return True
@@ -248,7 +248,7 @@ class OllamaFallbackTests(unittest.TestCase):
                 "confidence": 0.82,
             }
         )
-        fallback = module.OllamaPipelineFallback(
+        fallback = module.LlmPipelineFallback(
             provider=provider, timeout_s=5
         )
 
@@ -303,7 +303,7 @@ class OllamaFallbackTests(unittest.TestCase):
 
         for response in invalid:
             with self.subTest(response=response):
-                fallback = module.OllamaPipelineFallback(
+                fallback = module.LlmPipelineFallback(
                     provider=self.FakeProvider(response), timeout_s=5
                 )
                 with self.assertRaises(module.PipelineFallbackError):
@@ -311,7 +311,7 @@ class OllamaFallbackTests(unittest.TestCase):
 
     def test_provider_error_is_normalized(self):
         module = self._module()
-        fallback = module.OllamaPipelineFallback(
+        fallback = module.LlmPipelineFallback(
             provider=self.FakeProvider(error=TimeoutError("offline")),
             timeout_s=5,
         )
@@ -328,7 +328,7 @@ class OllamaFallbackTests(unittest.TestCase):
                 "confidence": 0.8,
             }
         )
-        fallback = module.OllamaPipelineFallback(
+        fallback = module.LlmPipelineFallback(
             provider=provider,
             timeout_s=5,
             english_validator=lambda _text: False,
@@ -680,7 +680,7 @@ class HealthStatusTests(unittest.TestCase):
             def describe(self):
                 return {
                     "enabled": True,
-                    "provider": "ollama",
+                    "provider": "vllm",
                     "model": "test-model",
                     "timeout_s": 60,
                     "max_workers": 2,
@@ -720,7 +720,7 @@ class HealthStatusTests(unittest.TestCase):
 
         self.assertTrue(payload["pipeline_fallback"]["available"])
         self.assertTrue(payload["pipeline_fallback"]["reachable"])
-        self.assertEqual("ollama", payload["pipeline_fallback"]["provider"])
+        self.assertEqual("vllm", payload["pipeline_fallback"]["provider"])
         self.assertEqual(2, payload["pipeline_fallback"]["max_workers"])
         self.assertEqual(64, payload["pipeline_fallback"]["queue"]["capacity"])
 
