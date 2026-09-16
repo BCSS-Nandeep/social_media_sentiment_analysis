@@ -201,6 +201,10 @@ TORCH_NUM_THREADS: int = int(os.getenv("SENTIMENT_TORCH_NUM_THREADS", "0"))
 API_MAX_TEXTS: int = int(os.getenv("SENTIMENT_API_MAX_TEXTS", "256"))
 API_MAX_TEXT_CHARS: int = int(os.getenv("SENTIMENT_API_MAX_TEXT_CHARS", "5000"))
 API_MAX_TOTAL_CHARS: int = int(os.getenv("SENTIMENT_API_MAX_TOTAL_CHARS", "200000"))
+# tenant_name is classification context only (see src/intelligence.py) — a
+# short caller-supplied label, not a document. Bounded well above any real
+# tenant/org name.
+API_MAX_TENANT_NAME_CHARS: int = int(os.getenv("SENTIMENT_API_MAX_TENANT_NAME_CHARS", "200"))
 
 # A single request that hangs inside the model (GPU-level stall, pathological
 # input) must not take the whole service down with it. Requests queue for the
@@ -295,6 +299,12 @@ ACTION_LABELS: tuple[str, ...] = (
     "Ignore", "Monitor", "Human Review", "Escalate", "Immediate Attention",
 )
 UNKNOWN_LABEL: str = "Unknown"
+
+# Event/issue stance — separate axis from sentiment (see src/intelligence.py).
+# Fixed taxonomy, not caller-overridable via policy_pack: stance is about the
+# position taken on the subject in the text, independent of any category taxonomy.
+STANCE_LABELS: tuple[str, ...] = ("Support", "Oppose", "Neutral", "Unclear")
+UNKNOWN_STANCE: str = "Unclear"
 
 # Edge-case thresholds. These produce deterministic *signals* attached to the
 # prompt; the model is told to weigh them. They never decide the verdict, except

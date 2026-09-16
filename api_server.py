@@ -28,8 +28,17 @@ request schema, response keys and latency:
         {"texts": [str, ...],
          "policy_pack"?: {...},   # optional caller taxonomy
          "intent_mode"?: "enum"|"free",
-         "timeout_s"?: number}
-        -> {"results": [ {<every /analyze key>, "intelligence": {...}} ]}
+         "timeout_s"?: number,
+         "tenant_name"?: str}     # caller/tenant label, prompt context only —
+                                  # not auth, not routing, one value per batch
+        -> {"results": [ {<every /analyze key>, "intelligence": {..., "stance",
+                          "stance_confidence"}} ]}
+
+    "stance" (Support|Oppose|Neutral|Unclear) and "stance_confidence" (0-1) are
+    additive `intelligence` fields: the position the text takes on the subject
+    it names, independent of `sentiment`'s emotional polarity. Both request and
+    response additions are additive-only — omitting `tenant_name` and ignoring
+    the new `intelligence` keys reproduces prior behaviour exactly.
 
 That endpoint runs the identical deterministic pipeline and then adds the
 second-stage assessment. Sentiment is never recomputed or overridden by it, and
@@ -48,6 +57,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+import re
 import sys
 import threading
 import time
@@ -209,7 +219,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="Social Media Sentiment Analysis", version="1.1.0", lifespan=lifespan
+    title="Social Media Sentiment Analysis", version="1.2.0", lifespan=lifespan
 )
 
 
@@ -241,6 +251,12 @@ class AnalyzeRequest(BaseModel):
     matched_keywords: Optional[list[list[MatchedKeywordModel]]] = None
     intent_mode: Literal["enum", "free"] = "enum"
     timeout_s: Optional[float] = None
+    # Caller/tenant label, passed to the intelligence prompt as context only.
+    # NOT an auth token, NOT a routing key, NOT a database selector — this
+    # service stays stateless and shared across tenants. One value applies to
+    # every text in the batch (no per-item tenant identity in this contract).
+    # Ignored by /analyze; used by /analyze/intelligence.
+    tenant_name: Optional[str] = None
 
 
 def _validate(texts: list[str]) -> int:
@@ -282,8 +298,40 @@ def _validate(texts: list[str]) -> int:
     return total
 
 
+_TENANT_NAME_BAD_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _validate_tenant_name(raw: Optional[str]) -> Optional[str]:
+    """Sanitize the optional tenant_name into a plain classification label.
+
+    tenant_name is context handed to the intelligence prompt — never a
+    filesystem path, SQL fragment, URL, shell input or auth token, and never
+    used to select a database, route the request, or access another tenant's
+    data. Bad input is rejected (422) rather than silently truncated or
+    escaped, so a caller notices instead of getting a mis-tagged result.
+    """
+    if raw is None:
+        return None
+    name = raw.strip()
+    if not name:
+        return None
+    if len(name) > config.API_MAX_TENANT_NAME_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"tenant_name is {len(name)} characters "
+                f"(limit {config.API_MAX_TENANT_NAME_CHARS})."
+            ),
+        )
+    if _TENANT_NAME_BAD_CHARS_RE.search(name):
+        raise HTTPException(
+            status_code=422, detail="tenant_name contains control characters"
+        )
+    return name
+
+
 def _resolve_intelligence_options(req: AnalyzeRequest):
-    """Parse optional policy_pack / timeout; raise HTTPException on bad input."""
+    """Parse optional policy_pack / timeout / tenant_name; raise HTTPException on bad input."""
     from src.intelligence import parse_policy_pack
 
     pack_dict: dict[str, Any] | None = None
@@ -300,7 +348,9 @@ def _resolve_intelligence_options(req: AnalyzeRequest):
             logger.info("Clamping timeout_s=%s into [5, 600]", timeout_s)
         timeout_s = max(5.0, min(600.0, float(timeout_s)))
 
-    return pack, req.intent_mode, timeout_s
+    tenant_name = _validate_tenant_name(req.tenant_name)
+
+    return pack, req.intent_mode, timeout_s, tenant_name
 
 
 @app.get("/health")
@@ -560,14 +610,14 @@ def analyze_intelligence(req: AnalyzeRequest):
     if not req.texts:
         return {"results": []}
 
-    pack, intent_mode, timeout_s = _resolve_intelligence_options(req)
+    pack, intent_mode, timeout_s, tenant_name = _resolve_intelligence_options(req)
 
     total_chars = _validate(req.texts)
     request_id = next(_request_ids)
     logger.info(
-        "req %d: received %d text(s), %d chars (with intelligence; pack=%s fp=%s mode=%s)",
+        "req %d: received %d text(s), %d chars (with intelligence; pack=%s fp=%s mode=%s tenant=%s)",
         request_id, len(req.texts), total_chars,
-        pack.name, pack.fingerprint[:19], intent_mode,
+        pack.name, pack.fingerprint[:19], intent_mode, tenant_name or "-",
     )
 
     try:
@@ -595,6 +645,7 @@ def analyze_intelligence(req: AnalyzeRequest):
             pack=pack,
             intent_mode=intent_mode,
             timeout_s=timeout_s,
+            tenant_name=tenant_name,
             matched_keywords=[
                 [kw.model_dump() for kw in (mks or [])]
                 for mks in (req.matched_keywords or [])

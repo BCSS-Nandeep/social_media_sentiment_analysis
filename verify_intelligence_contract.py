@@ -10,6 +10,12 @@ Asserts:
   * provider failure yields source="error"
   * triage yields source="triage"
   * exactly one provider generate() call per unique post
+  * stance is a fixed enum, independent of the category policy pack
+  * stance is not derived from sentiment (positive != Support, negative != Oppose)
+  * malformed stance / stance_confidence from the model is clamped, never raises
+  * triage/error paths carry a well-formed stance ("Unclear", confidence 0.0)
+  * tenant_name reaches the provider payload as context and never as a field
+    the model is asked to classify
 
 Run from the service root:
     python verify_intelligence_contract.py
@@ -28,6 +34,7 @@ from src.intelligence import (
     IntelligenceProvider,
     PolicyCategory,
     PolicyPack,
+    build_payload,
     _schema_for,
     fingerprint_pack,
     parse_policy_pack,
@@ -45,12 +52,14 @@ class StubProvider(IntelligenceProvider):
         self.calls = 0
         self.last_schema: dict | None = None
         self.last_prompt: str = ""
+        self.last_payload: dict | None = None
         self.model = "stub-model"
 
     def generate(self, payload, *, system_prompt, schema, timeout_s=None):
         self.calls += 1
         self.last_schema = schema
         self.last_prompt = system_prompt
+        self.last_payload = payload
         if self.fail:
             raise RuntimeError("stub provider deliberately failing")
         return dict(self.canned)
@@ -221,6 +230,118 @@ def test_batch_dedupe_one_call() -> None:
     _assert("duplicate_post" in records[1].signals, records[1].signals)
 
 
+def _canned(**overrides) -> dict:
+    base = {
+        "category": "Normal",
+        "intent": "share news",
+        "intent_label": "Information",
+        "risk_score": 5,
+        "reasoning": "benign",
+        "summary": "benign post",
+        "recommended_action": "Ignore",
+        "evidence_confidence": "high",
+        "stance": "Neutral",
+        "stance_confidence": 0.5,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_schema_has_stance_fields() -> None:
+    schema = _schema_for(DEFAULT_POLICY_PACK, "enum")
+    _assert("stance" in schema["properties"], "schema missing stance")
+    _assert("stance_confidence" in schema["properties"], "schema missing stance_confidence")
+    _assert(set(schema["properties"]["stance"]["enum"]) == set(config.STANCE_LABELS),
+            schema["properties"]["stance"]["enum"])
+    _assert("stance" in schema["required"] and "stance_confidence" in schema["required"],
+            "stance fields must be required")
+
+
+def test_stance_not_derived_from_sentiment() -> None:
+    """A model may report Oppose stance on a post the pipeline scored Positive
+    sentiment — the two axes are independent and neither may override the other."""
+    provider = StubProvider(canned=_canned(stance="Oppose", stance_confidence=0.8))
+    analyzer = IntelligenceAnalyzer(provider=provider)
+    pack = _sockeye_pack()
+    record = analyzer.analyze_one(
+        _pipeline_payload(sentiment="Positive"), pack=pack, intent_mode="free",
+    )
+    _assert(record.stance == "Oppose", f"expected Oppose, got {record.stance}")
+    _assert(record.stance_confidence == 0.8, record.stance_confidence)
+
+    provider2 = StubProvider(canned=_canned(stance="Support", stance_confidence=0.7))
+    record2 = IntelligenceAnalyzer(provider=provider2).analyze_one(
+        _pipeline_payload(sentiment="Negative"), pack=pack, intent_mode="free",
+    )
+    _assert(record2.stance == "Support", f"expected Support, got {record2.stance}")
+
+
+def test_stance_out_of_enum_falls_back_to_unclear() -> None:
+    provider = StubProvider(canned=_canned(stance="Definitely Yes"))
+    record = IntelligenceAnalyzer(provider=provider).analyze_one(
+        _pipeline_payload(), pack=_sockeye_pack(), intent_mode="free",
+    )
+    _assert(record.stance == config.UNKNOWN_STANCE, record.stance)
+
+
+def test_stance_confidence_clamped_and_never_nan() -> None:
+    cases = [
+        (5, 1.0), (-3, 0.0), (float("nan"), 0.0), (float("inf"), 0.0),
+        ("not-a-number", 0.0), (None, 0.0), (0.42, 0.42),
+    ]
+    for raw, expected in cases:
+        provider = StubProvider(canned=_canned(stance_confidence=raw))
+        record = IntelligenceAnalyzer(provider=provider).analyze_one(
+            _pipeline_payload(), pack=_sockeye_pack(), intent_mode="free",
+        )
+        _assert(
+            record.stance_confidence == expected,
+            f"stance_confidence({raw!r}) -> {record.stance_confidence}, expected {expected}",
+        )
+        _assert(record.stance_confidence == record.stance_confidence, "NaN leaked through")
+
+
+def test_triage_and_error_stance_is_unclear() -> None:
+    triage_record = IntelligenceAnalyzer(provider=StubProvider(fail=True)).analyze_one(
+        _pipeline_payload(post_text="   ", english_text=""), pack=_sockeye_pack(),
+    )
+    _assert(triage_record.stance == config.UNKNOWN_STANCE, triage_record.stance)
+    _assert(triage_record.stance_confidence == 0.0, triage_record.stance_confidence)
+
+    error_record = IntelligenceAnalyzer(provider=StubProvider(fail=True)).analyze_one(
+        _pipeline_payload(), pack=_sockeye_pack(),
+    )
+    _assert(error_record.stance == config.UNKNOWN_STANCE, error_record.stance)
+    _assert(error_record.stance_confidence == 0.0, error_record.stance_confidence)
+
+
+def test_tenant_name_reaches_payload_as_context_only() -> None:
+    provider = StubProvider(canned=_canned())
+    analyzer = IntelligenceAnalyzer(provider=provider)
+    analyzer.analyze_one(
+        _pipeline_payload(), pack=_sockeye_pack(), intent_mode="free",
+        tenant_name="Tenant 1",
+    )
+    _assert(provider.last_payload is not None, "provider was not called")
+    _assert(provider.last_payload.get("tenant_name") == "Tenant 1",
+            provider.last_payload)
+    schema = _schema_for(_sockeye_pack(), "free")
+    _assert("tenant_name" not in schema["properties"],
+            "tenant_name must never be a field the model classifies")
+
+    provider2 = StubProvider(canned=_canned())
+    IntelligenceAnalyzer(provider=provider2).analyze_one(
+        _pipeline_payload(), pack=_sockeye_pack(), intent_mode="free",
+    )
+    _assert("tenant_name" not in (provider2.last_payload or {}),
+            "omitted tenant_name must not appear in the payload")
+
+
+def test_build_payload_backward_compatible_without_tenant_name() -> None:
+    payload = build_payload(_pipeline_payload(), [])
+    _assert("tenant_name" not in payload, "legacy call site must be unaffected")
+
+
 def main() -> int:
     tests = [
         test_default_pack_schema_matches_builtin,
@@ -231,6 +352,13 @@ def main() -> int:
         test_category_clamped_to_pack,
         test_free_intent_word_clamp,
         test_batch_dedupe_one_call,
+        test_schema_has_stance_fields,
+        test_stance_not_derived_from_sentiment,
+        test_stance_out_of_enum_falls_back_to_unclear,
+        test_stance_confidence_clamped_and_never_nan,
+        test_triage_and_error_stance_is_unclear,
+        test_tenant_name_reaches_payload_as_context_only,
+        test_build_payload_backward_compatible_without_tenant_name,
     ]
     failed = 0
     for test in tests:

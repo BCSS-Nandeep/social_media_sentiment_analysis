@@ -367,6 +367,7 @@ Optional request fields (all ignored by `/analyze`):
 | `policy_pack` | built-in taxonomy | Caller category allowlist (`id` + optional `definition`/`severity`/`keywords`), plus `unknown_label` |
 | `intent_mode` | `enum` | `enum` = fixed intent labels; `free` = 2–8 word phrase + `intent_label` enum |
 | `timeout_s` | `VLLM_TIMEOUT_S` | Per-request vLLM timeout override (clamped to 5–600) |
+| `tenant_name` | _(none)_ | Caller/tenant label. See [Tenant context](#tenant-context) below. |
 
 Example with a SOCKEYE-style pack:
 
@@ -400,6 +401,7 @@ Each result carries every `/analyze` key plus an `intelligence` object:
     "risk_score": 72,
     "reasoning": "...", "summary": "...", "recommended_action": "Monitor",
     "evidence_confidence": "high",
+    "stance": "Support", "stance_confidence": 0.83,
     "signals": ["code_mixed"], "source": "provider",
     "model": "Qwen3-14B-AWQ", "latency_ms": 1840.2,
     "policy_pack_fingerprint": "sha256:…",
@@ -411,6 +413,59 @@ Each result carries every `/analyze` key plus an `intelligence` object:
 `source` is one of `provider` | `triage` | `error`. SOCKEYE clients must treat
 `error` as failure (equivalent to a null LLM result), not as a valid verdict.
 
+### Stance (event/issue position)
+
+`stance` and `stance_confidence` are additive `intelligence` fields, a
+**separate axis from `sentiment`**:
+
+- `sentiment` — the emotional/polarity tone of the text (unchanged, still
+  produced by the deterministic pipeline stage — never by the LLM).
+- `stance` — the position the author takes toward the specific subject, event
+  or issue the text itself names or clearly implies. One of `Support` |
+  `Oppose` | `Neutral` | `Unclear`.
+- `stance_confidence` — `0.0`–`1.0`, the model's confidence in `stance`.
+  Always a finite number in range; malformed or missing model output is
+  clamped to `0.0` rather than propagated, and NaN/Infinity are rejected the
+  same way `risk_score` is.
+
+Stance is **not** derived from sentiment — praising how well a protest was
+organized (positive sentiment) is not support for the protest's cause, and a
+grim factual report on a policy (negative sentiment) is not opposition to it.
+When the text names no clear subject, or the post is too short/ambiguous,
+`stance` is `Unclear` with a low `stance_confidence` rather than a guess.
+Posts resolved by triage or a failed provider call (see Guarantees below)
+carry `stance: "Unclear"`, `stance_confidence: 0.0`, consistent with their
+other placeholder fields.
+
+### Tenant context
+
+`tenant_name` (request field, optional) labels which caller/tenant an
+`/analyze/intelligence` request is for. It is passed to the model as
+background context only:
+
+- **Not authorization.** It grants no access and is never checked against
+  any allowlist.
+- **Not a routing or database key.** The service loads one shared model set
+  and stays fully stateless; `tenant_name` never selects a database,
+  connection, cache namespace, or code path.
+- **One value per request.** The current batch contract (`texts: [...]`) has
+  no per-item tenant identity, so `tenant_name` applies to every text in that
+  request. Callers needing per-post tenants must split them into separate
+  requests.
+- **Validated, not trusted as instructions.** Bounded to 200 characters
+  (`SENTIMENT_API_MAX_TENANT_NAME_CHARS`), rejected with `422` if longer or if
+  it contains control characters. The system prompt explicitly tells the
+  model to treat it as inert metadata, never as a directive or as the subject
+  of the stance.
+- **Backward compatible.** Omitting it (or calling `/analyze`, which ignores
+  it) reproduces prior behaviour exactly.
+
+```bash
+curl -X POST http://localhost:8003/analyze/intelligence \
+  -H "Content-Type: application/json" \
+  -d '{"texts": ["..."], "tenant_name": "Tenant 1"}'
+```
+
 Both output sets belong in the stored analysis record. `predict.py --intelligence`
 writes them as columns alongside the sentiment columns.
 
@@ -418,6 +473,7 @@ Contract checks (no live vLLM required):
 
 ```bash
 python verify_intelligence_contract.py
+python -m unittest tests.test_api_tenant_stance
 ```
 
 ## Configuration
@@ -437,6 +493,7 @@ python verify_intelligence_contract.py
 | `VLLM_MAX_TOKENS` | 256 | Max generation tokens |
 | `VLLM_JSON_SCHEMA` | 1 | Prefer `response_format=json_schema`; auto-downgrades to `json_object` if rejected |
 | `SENTIMENT_INTELLIGENCE_PROVIDER` | `vllm` | Selects the provider from the registry |
+| `SENTIMENT_API_MAX_TENANT_NAME_CHARS` | 200 | Max length of the optional `tenant_name` request field (422 above this) |
 
 ## Guarantees
 
