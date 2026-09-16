@@ -73,7 +73,12 @@ class LanguageDetector:
             if self.backend == "lingua":
                 lang = self._lingua.detect_language_of(text)
                 if lang is None:
-                    return UNKNOWN
+                    # lingua has no model for some configured languages at all
+                    # (e.g. Odia) — the native-script fallback this class was
+                    # already documented to use (see __init__) but never called.
+                    from src.script_detection import unique_indic_language
+
+                    return unique_indic_language(text) or UNKNOWN
                 return lang.iso_code_639_1.name.lower()
             if self.backend == "langdetect":
                 code: Optional[str] = self._langdetect.detect(text)

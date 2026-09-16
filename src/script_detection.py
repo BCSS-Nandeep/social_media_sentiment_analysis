@@ -16,6 +16,7 @@ UNICODE_RANGES: dict[str, tuple[int, int]] = {
     "bengali": (0x0980, 0x09FF),
     "gurmukhi": (0x0A00, 0x0A7F),  # Punjabi
     "gujarati": (0x0A80, 0x0AFF),
+    "odia": (0x0B00, 0x0B7F),
     "tamil": (0x0B80, 0x0BFF),
     "telugu": (0x0C00, 0x0C7F),
     "kannada": (0x0C80, 0x0CFF),
@@ -36,6 +37,7 @@ UNIQUE_SCRIPT_TO_LANG: dict[str, str] = {
     "gujarati": "gu",
     "bengali": "bn",
     "perso_arabic": "ur",
+    "odia": "or",
 }
 
 

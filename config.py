@@ -94,6 +94,7 @@ FLORES_CODES: dict[str, str] = {
     "gu": "guj_Gujr",
     "pa": "pan_Guru",
     "ur": "urd_Arab",
+    "or": "ory_Orya",
 }
 TARGET_FLORES: str = "eng_Latn"
 
