@@ -103,7 +103,7 @@ LABELS_BY_INDEX = [
 LABEL_TO_LANG: dict[str, str] = {
     "hin_Latn": "hi", "ben_Latn": "bn", "guj_Latn": "gu", "kan_Latn": "kn",
     "mal_Latn": "ml", "mar_Latn": "mr", "pan_Latn": "pa", "tam_Latn": "ta",
-    "tel_Latn": "te", "urd_Latn": "ur", "eng_Latn": "en",
+    "tel_Latn": "te", "urd_Latn": "ur", "eng_Latn": "en", "ori_Latn": "or",
 }
 
 

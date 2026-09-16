@@ -50,7 +50,7 @@ CHECKPOINT_LANG_LIST = (
 # each) is simpler than sharing one model + rebuilding the generator per
 # call, at the cost of ~10x the memory/startup time for a model this small.
 # Revisit if startup time or memory becomes a real constraint.
-SUPPORTED_LANGS = ("hi", "te", "ta", "kn", "ml", "mr", "bn", "gu", "pa", "ur")
+SUPPORTED_LANGS = ("hi", "te", "ta", "kn", "ml", "mr", "bn", "gu", "pa", "ur", "or")
 
 ROMAN_WORD_RE = re.compile(r"^([^A-Za-z]*)([A-Za-z]+)([^A-Za-z]*)$")
 
