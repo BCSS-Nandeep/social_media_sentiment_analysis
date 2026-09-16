@@ -275,6 +275,16 @@ VLLM_CIRCUIT_FAILURES: int = max(2, int(os.getenv("VLLM_CIRCUIT_FAILURES", "8"))
 VLLM_CIRCUIT_COOLDOWN_S: float = max(
     5.0, float(os.getenv("VLLM_CIRCUIT_COOLDOWN_S", "30"))
 )
+# How long a caller waits for a fair turn at a gate slot before giving up
+# with a 429, once tenant-aware admission (llm_gate.py) is in play. Bounded
+# so a busy tenant queue can't hold a FastAPI threadpool thread forever.
+VLLM_GATE_WAIT_TIMEOUT_S: float = max(
+    1.0, float(os.getenv("VLLM_GATE_WAIT_TIMEOUT_S", "45"))
+)
+# Distinct tenant_key values the gate will track before new ones fall back
+# into the shared "unknown" rotation slot — bounds memory from a malformed
+# or spoofed key stream. Real tenant count today is small (single digits).
+TENANT_GATE_MAX_TRACKED: int = max(1, int(os.getenv("TENANT_GATE_MAX_TRACKED", "64")))
 # Prefer OpenAI-style json_schema response_format when the server supports it;
 # the provider falls back to json_object / plain JSON prompting on rejection.
 VLLM_JSON_SCHEMA: bool = os.getenv("VLLM_JSON_SCHEMA", "1") not in (

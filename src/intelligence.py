@@ -752,8 +752,13 @@ class IntelligenceProvider(ABC):
         system_prompt: str,
         schema: dict,
         timeout_s: float | None = None,
+        tenant_key: str | None = None,
     ) -> dict:
-        """Return the model's parsed JSON object, or raise."""
+        """Return the model's parsed JSON object, or raise.
+
+        tenant_key is only an admission-fairness hint for the shared LLM
+        gate (src/llm_gate.py) — it never reaches system_prompt/payload.
+        """
 
     @abstractmethod
     def describe(self) -> dict:
@@ -857,11 +862,12 @@ class VLLMProvider(IntelligenceProvider):
         system_prompt: str,
         schema: dict,
         timeout_s: float | None = None,
+        tenant_key: str | None = None,
     ) -> dict:
         timeout = self.timeout_s if timeout_s is None else timeout_s
         last_error: Exception | None = None
         gate = get_llm_gate()
-        with gate.slot():
+        with gate.slot(tenant_key=tenant_key):
             for attempt in range(self.retries + 1):
                 use_schema = self._use_schema
                 try:
@@ -978,6 +984,7 @@ class IntelligenceAnalyzer:
         timeout_s: float | None = None,
         matched_keywords: list[dict] | None = None,
         tenant_name: str | None = None,
+        tenant_key: str | None = None,
     ) -> IntelligenceResult:
         """Never raises — every failure becomes an 'insufficient evidence' record."""
         pack = pack or DEFAULT_POLICY_PACK
@@ -1000,6 +1007,7 @@ class IntelligenceAnalyzer:
                 system_prompt=system_prompt,
                 schema=schema,
                 timeout_s=timeout_s,
+                tenant_key=tenant_key,
             )
         except (LlmGateFull, LlmCircuitOpen):
             raise
@@ -1031,12 +1039,14 @@ class IntelligenceAnalyzer:
         timeout_s: float | None = None,
         matched_keywords: list[list[dict]] | None = None,
         tenant_name: str | None = None,
+        tenant_key: str | None = None,
     ) -> list[IntelligenceResult]:
         """Order-preserving. Duplicate posts share one provider call.
 
-        ``tenant_name`` is one caller-supplied value for the whole batch (the
-        current request contract has no per-item tenant identity), so it is
-        passed unchanged to every post rather than mixed across a batch.
+        ``tenant_name``/``tenant_key`` are one caller-supplied value for the
+        whole batch (the current request contract has no per-item tenant
+        identity), so each is passed unchanged to every post rather than
+        mixed across a batch.
         """
         if not results:
             return []
@@ -1074,7 +1084,7 @@ class IntelligenceAnalyzer:
             mks = matched_keywords[j] if matched_keywords and j < len(matched_keywords) else None
             return self.analyze_one(
                 results[j], pack=pack, intent_mode=intent_mode, timeout_s=timeout_s,
-                matched_keywords=mks, tenant_name=tenant_name,
+                matched_keywords=mks, tenant_name=tenant_name, tenant_key=tenant_key,
             )
 
         if workers == 1:

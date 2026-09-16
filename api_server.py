@@ -257,6 +257,14 @@ class AnalyzeRequest(BaseModel):
     # every text in the batch (no per-item tenant identity in this contract).
     # Ignored by /analyze; used by /analyze/intelligence.
     tenant_name: Optional[str] = None
+    # Opaque scheduling key for the tenant-fair LLM gate (src/llm_gate.py) —
+    # distinct from tenant_name: this one is NEVER put in front of the LLM,
+    # it only decides admission order. Caller-recommended value is a stable,
+    # unique-per-tenant identifier (e.g. a tenant database name); a display
+    # name works but risks two tenants sharing a queue if they pick the same
+    # one. Missing/omitted falls into one shared "unknown" rotation slot.
+    # Ignored by /analyze; used by /analyze/intelligence.
+    tenant_key: Optional[str] = None
 
 
 def _validate(texts: list[str]) -> int:
@@ -301,37 +309,39 @@ def _validate(texts: list[str]) -> int:
 _TENANT_NAME_BAD_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
-def _validate_tenant_name(raw: Optional[str]) -> Optional[str]:
-    """Sanitize the optional tenant_name into a plain classification label.
-
-    tenant_name is context handed to the intelligence prompt — never a
-    filesystem path, SQL fragment, URL, shell input or auth token, and never
-    used to select a database, route the request, or access another tenant's
-    data. Bad input is rejected (422) rather than silently truncated or
-    escaped, so a caller notices instead of getting a mis-tagged result.
+def _validate_short_label(raw: Optional[str], field_name: str) -> Optional[str]:
+    """Sanitize an optional short caller-supplied label (tenant_name or
+    tenant_key). Neither is a filesystem path, SQL fragment, URL, shell
+    input or auth token, and neither selects a database, routes the
+    request, or accesses another tenant's data — tenant_name is prompt
+    context, tenant_key is only a fairness-scheduling map key (see
+    AnalyzeRequest). Bad input is rejected (422) rather than silently
+    truncated or escaped, so a caller notices instead of getting a
+    mis-tagged/mis-scheduled result.
     """
     if raw is None:
         return None
-    name = raw.strip()
-    if not name:
+    value = raw.strip()
+    if not value:
         return None
-    if len(name) > config.API_MAX_TENANT_NAME_CHARS:
+    if len(value) > config.API_MAX_TENANT_NAME_CHARS:
         raise HTTPException(
             status_code=422,
             detail=(
-                f"tenant_name is {len(name)} characters "
+                f"{field_name} is {len(value)} characters "
                 f"(limit {config.API_MAX_TENANT_NAME_CHARS})."
             ),
         )
-    if _TENANT_NAME_BAD_CHARS_RE.search(name):
+    if _TENANT_NAME_BAD_CHARS_RE.search(value):
         raise HTTPException(
-            status_code=422, detail="tenant_name contains control characters"
+            status_code=422, detail=f"{field_name} contains control characters"
         )
-    return name
+    return value
 
 
 def _resolve_intelligence_options(req: AnalyzeRequest):
-    """Parse optional policy_pack / timeout / tenant_name; raise HTTPException on bad input."""
+    """Parse optional policy_pack / timeout / tenant_name / tenant_key; raise
+    HTTPException on bad input."""
     from src.intelligence import parse_policy_pack
 
     pack_dict: dict[str, Any] | None = None
@@ -348,9 +358,10 @@ def _resolve_intelligence_options(req: AnalyzeRequest):
             logger.info("Clamping timeout_s=%s into [5, 600]", timeout_s)
         timeout_s = max(5.0, min(600.0, float(timeout_s)))
 
-    tenant_name = _validate_tenant_name(req.tenant_name)
+    tenant_name = _validate_short_label(req.tenant_name, "tenant_name")
+    tenant_key = _validate_short_label(req.tenant_key, "tenant_key")
 
-    return pack, req.intent_mode, timeout_s, tenant_name
+    return pack, req.intent_mode, timeout_s, tenant_name, tenant_key
 
 
 @app.get("/health")
@@ -610,14 +621,14 @@ def analyze_intelligence(req: AnalyzeRequest):
     if not req.texts:
         return {"results": []}
 
-    pack, intent_mode, timeout_s, tenant_name = _resolve_intelligence_options(req)
+    pack, intent_mode, timeout_s, tenant_name, tenant_key = _resolve_intelligence_options(req)
 
     total_chars = _validate(req.texts)
     request_id = next(_request_ids)
     logger.info(
-        "req %d: received %d text(s), %d chars (with intelligence; pack=%s fp=%s mode=%s tenant=%s)",
+        "req %d: received %d text(s), %d chars (with intelligence; pack=%s fp=%s mode=%s tenant=%s key=%s)",
         request_id, len(req.texts), total_chars,
-        pack.name, pack.fingerprint[:19], intent_mode, tenant_name or "-",
+        pack.name, pack.fingerprint[:19], intent_mode, tenant_name or "-", tenant_key or "-",
     )
 
     try:
@@ -646,6 +657,7 @@ def analyze_intelligence(req: AnalyzeRequest):
             intent_mode=intent_mode,
             timeout_s=timeout_s,
             tenant_name=tenant_name,
+            tenant_key=tenant_key,
             matched_keywords=[
                 [kw.model_dump() for kw in (mks or [])]
                 for mks in (req.matched_keywords or [])
