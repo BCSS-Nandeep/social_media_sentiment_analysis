@@ -159,7 +159,9 @@ class LlmPipelineFallback:
         ):
             raise PipelineFallbackError("vLLM fallback confidence is invalid")
         if failure.language != "en" and not translation_is_usable(
-            failure.post_text, english_text
+            failure.post_text,
+            english_text,
+            require_change=failure.language != "unknown",
         ):
             raise PipelineFallbackError("vLLM fallback translation is unusable")
         if (

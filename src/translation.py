@@ -272,13 +272,23 @@ def polarity_is_preserved(source: str, translated: str) -> bool:
     return True
 
 
-def translation_is_usable(source: str, translated: str) -> bool:
-    """Reject outputs that cannot be a credible English translation."""
+def translation_is_usable(
+    source: str, translated: str, *, require_change: bool = True
+) -> bool:
+    """Reject outputs that cannot be a credible English translation.
+
+    ``require_change=False`` is for a source language that could not be
+    detected at all ("unknown"): the model may correctly return the input
+    unchanged when it was already English, so identical text must not be
+    treated as a failed translation there. Every other language always has
+    a known source token, so an unchanged result there does mean the model
+    skipped the translation.
+    """
     source = str(source or "").strip()
     translated = str(translated or "").strip()
     if not translated:
         return False
-    if source.casefold() == translated.casefold():
+    if require_change and source.casefold() == translated.casefold():
         return False
     letters = [char for char in translated if char.isalpha()]
     if not letters:
