@@ -4,6 +4,11 @@
 # new Cache API in newer 4.5x releases). Verified working: 4.40.x.
 transformers==4.40.2
 tokenizers>=0.19,<0.20
+# Plain `pip install torch` from this file pulls the CPU-only wheel from
+# PyPI. For a GPU host, install the CUDA build first (matching version, e.g.
+# `pip install torch==<version>+cu126 --index-url
+# https://download.pytorch.org/whl/cu126`), then run this file — pip will
+# see the pin already satisfied and leave it alone.
 torch>=2.1
 scikit-learn>=1.4
 matplotlib>=3.8

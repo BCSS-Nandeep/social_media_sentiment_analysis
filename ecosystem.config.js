@@ -7,6 +7,14 @@
 // knowledge, and so the --workers count (see below) is an explicit,
 // reviewable decision instead of an invisible server-side setting.
 //
+// SENTIMENT_DEVICE: 'cuda', not 'cpu' or 'auto'. Pinned to CPU while the
+// server's local vLLM stack (Qwen3-8B-AWQ, docker) held ~19GB of the A10G's
+// 23GB VRAM for the LLM gate — Saga and this service now both use a remote
+// vLLM endpoint instead (see Saga's LLM_BASE_URL / this repo's
+// VLLM_BASE_URL), the local stack was decommissioned, and the GPU is free.
+// 'cuda' pins the choice explicitly rather than 'auto' silently falling
+// back to CPU again if the GPU is ever unavailable at boot.
+//
 // --workers: deliberately 1, not 2. This process previously ran with
 // `--workers 2`, which uvicorn implements as two fully independent OS
 // processes with no shared memory — including two independent LlmGate
@@ -34,7 +42,7 @@ module.exports = {
         HF_HOME: '/data/hf-cache',
         TRANSFORMERS_CACHE: '/data/hf-cache',
         TMPDIR: '/data/tmp',
-        SENTIMENT_DEVICE: 'cpu',
+        SENTIMENT_DEVICE: 'cuda',
       },
     },
   ],
